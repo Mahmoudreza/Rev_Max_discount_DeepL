@@ -1,0 +1,119 @@
+# configs/base_config.yaml
+# Shared defaults. Override in configs/experiments/*.yaml
+
+project:
+  name: "revmax-aaai2027"
+  experiment_name: "base"
+  seed: 42
+  output_dir: "results"
+
+# ── Network settings ─────────────────────────────────────────────────────────
+graph:
+  type: "forest_fire"           # forest_fire | modular_ff | facebook | yeast | wiki | newman | hep
+  n_nodes: 1000                 # for synthetic graphs
+  p: 0.37                       # forest fire forward prob
+  pb: 0.32                      # forest fire backward prob
+  # modular FF settings:
+  n_modules: 3
+  module_sizes: [200, 300, 500]
+  inter_module_prob: 0.01
+
+# ── Influence model ───────────────────────────────────────────────────────────
+influence:
+  model: "monotone"             # monotone | non_monotone
+  # Rayleigh parameters (b=1, y=2x as in Babaei et al.)
+  b: 1.0
+  weight_dist: "uniform"        # distribution for link weights w_ij
+  weight_low: 0.0
+  weight_high: 2.0
+  n_mc_samples: 200             # Monte Carlo samples to estimate influence
+
+# ── Node features (20-dim) ────────────────────────────────────────────────────
+features:
+  dim: 20                       # 10 static + 6 dynamic (WSDM) + 4 pricing-specific
+  static_dims: 10               # deg, cc, bc, pr, kc, ec, tc, cl, ecc, and
+  dynamic_dims: 6               # seed_flag, round_ratio, hop1_seed_frac, log_deg, cluster_repeat, group_flag
+  pricing_dims: 4               # current_influence, current_valuation, was_offered, steps_remaining
+
+# ── GNN Encoder ───────────────────────────────────────────────────────────────
+encoder:
+  type: "graphsage"             # graphsage | graph_transformer
+  hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
+# ── Policy ────────────────────────────────────────────────────────────────────
+policy:
+  scoring_head: [64, 32, 1]     # MLP dims for node scoring
+  pricing_head: [64, 32, 1]     # MLP dims for discount output (+ Sigmoid)
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  algorithm: "reinforce"        # imitation | gail | reinforce | ppo | sac
+  n_epochs: 200
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 0.0
+  grad_clip: 1.0
+
+  # Imitation phase (Phase 1)
+  imitation_epochs: 100
+  imitation_lr: 1.0e-3
+
+  # GAIL phase (Phase 1 alternative)
+  gail_epochs: 50
+  gail_lr_gen: 1.0e-4
+  gail_lr_disc: 1.0e-4
+  gail_beta: 0.1                # weight of spread bonus in GAIL reward (Eq.18 in WSDM)
+
+  # REINFORCE phase (Phase 2)
+  reinforce_epochs: 100
+  reinforce_lr: 1.0e-4
+  n_rollouts: 10                # rollouts per update step
+  mc_budget: 200                # MC simulations for reward estimation
+
+  # PPO-specific
+  ppo_clip: 0.2
+  ppo_epochs: 10
+  ppo_lr: 3.0e-4
+  ppo_entropy_coef: 0.01
+
+  # SAC-specific
+  sac_lr: 3.0e-4
+  sac_alpha: 0.2
+  sac_buffer_size: 100000
+  sac_batch_size: 256
+  sac_tau: 0.005
+  sac_n_updates: 500
+
+  # Misc
+  n_train_graphs: 5
+
+# ── Evaluation ───────────────────────────────────────────────────────────────
+evaluation:
+  n_test_graphs: 3
+  n_trials: 5
+
+# ── Revenue (MDP reward) ──────────────────────────────────────────────────────
+reward:
+  type: "flat"                  # flat | npv (Idea 2)
+  gamma: 1.0                    # discount factor; set < 1.0 for Idea 2 (NPV)
+
+# ── Budget ────────────────────────────────────────────────────────────────────
+budget:
+  k: 30                         # max buyers in seed set S (only for baselines)
+  # For RL: the agent offers to ALL n buyers sequentially
+
+# ── Checkpointing ─────────────────────────────────────────────────────────────
+checkpointing:
+  save_best: true
+  metric: "total_revenue"       # metric to monitor
+  mode: "max"
+  checkpoint_dir: "results/checkpoints"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  use_wandb: false
+  wandb_project: "revmax-aaai2027"
+  log_every_n_steps: 10
+  log_dir: "results/logs"

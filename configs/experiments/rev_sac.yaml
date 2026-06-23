@@ -1,0 +1,13 @@
+# configs/experiments/rev_sac.yaml
+project:
+  experiment_name: "rev_sac"
+encoder:
+  type: "graphsage"
+training:
+  algorithm: "sac"
+  sac_lr: 3.0e-4
+  sac_alpha: 0.2
+  sac_buffer_size: 100000
+  sac_batch_size: 256
+  sac_tau: 0.005
+  grad_clip: 1.0

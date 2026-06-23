@@ -1,0 +1,10 @@
+# configs/experiments/ablation_discount_head.yaml
+# Ablation: joint vs decoupled pricing
+project:
+  experiment_name: "ablation_discount_head"
+encoder:
+  type: "graphsage"
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 50
+  reinforce_epochs: 50

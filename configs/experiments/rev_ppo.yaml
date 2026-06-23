@@ -1,0 +1,13 @@
+# configs/experiments/rev_ppo.yaml
+project:
+  experiment_name: "rev_ppo"
+encoder:
+  type: "graphsage"
+training:
+  algorithm: "ppo"
+  n_epochs: 200
+  ppo_clip: 0.2
+  ppo_epochs: 10
+  ppo_lr: 3.0e-4
+  ppo_entropy_coef: 0.01
+  grad_clip: 1.0

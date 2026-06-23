@@ -1,0 +1,14 @@
+# configs/experiments/rev_gail_lstm.yaml
+project:
+  experiment_name: "rev_gail_lstm"
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+sequence_model:
+  type: "lstm"
+  lstm_hidden: 64
+  lstm_n_layers: 1
+training:
+  algorithm: "gail+reinforce"
+  gail_epochs: 50
+  reinforce_epochs: 100

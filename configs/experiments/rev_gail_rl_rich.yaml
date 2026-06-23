@@ -1,0 +1,11 @@
+# configs/experiments/rev_gail_rl_rich.yaml
+project:
+  experiment_name: "rev_gail_rl_rich"
+encoder:
+  type: "graphsage"
+training:
+  algorithm: "gail+reinforce"
+  gail_epochs: 50
+  reinforce_epochs: 100
+  gail_lr_gen: 1.0e-4
+  gail_lr_disc: 1.0e-4

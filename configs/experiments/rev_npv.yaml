@@ -1,0 +1,13 @@
+# configs/experiments/rev_npv.yaml
+# Idea 2: Time-discounted revenue (NPV objective)
+project:
+  experiment_name: "rev_npv"
+encoder:
+  type: "graphsage"
+reward:
+  type: "npv"
+  gamma: 0.9
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 100
+  reinforce_epochs: 100

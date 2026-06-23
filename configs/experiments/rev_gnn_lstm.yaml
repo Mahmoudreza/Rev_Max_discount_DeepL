@@ -1,0 +1,14 @@
+# configs/experiments/rev_gnn_lstm.yaml
+project:
+  experiment_name: "rev_gnn_lstm"
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+sequence_model:
+  type: "lstm"
+  lstm_hidden: 64
+  lstm_n_layers: 1
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 100
+  reinforce_epochs: 100

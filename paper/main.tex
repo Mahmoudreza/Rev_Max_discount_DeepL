@@ -1,0 +1,47 @@
+% paper/main.tex — AAAI 2027 submission
+% DO NOT write section content here — edit paper/sections/*.tex
+
+\documentclass[letterpaper]{article}
+\usepackage{aaai27}   % AAAI 2027 style
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+
+% ── Result macros — never hardcode numbers in sections ──────────────────────
+\newcommand{\bestrevenue}{XX.X}
+\newcommand{\baselinerevenue}{XX.X}
+\newcommand{\improvementpct}{XX.X}
+\newcommand{\speedup}{XXX}
+\newcommand{\npvgamma}{0.9}
+\newcommand{\modelname}{Rev-GAIL-RL-Rich}
+
+% ── Document ─────────────────────────────────────────────────────────────────
+\title{Joint Seed Selection and Discounting for Revenue Maximization\\
+       in Social Networks via Deep Reinforcement Learning}
+
+\author{[Authors blinded for review]}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/problem_formulation}
+\input{sections/methodology}
+\input{sections/experiments}
+\input{sections/results}
+\input{sections/conclusion}
+
+\bibliographystyle{aaai27}
+\bibliography{references}
+
+\end{document}

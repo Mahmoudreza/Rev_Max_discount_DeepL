@@ -1,0 +1,20 @@
+# configs/experiments/rev_gnn_im_rl.yaml
+# Rev-GNN-IM-RL: GraphSAGE + Imitation (Phase 1) + REINFORCE (Phase 2)
+
+project:
+  experiment_name: "rev_gnn_im_rl"
+
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 100
+  reinforce_epochs: 100
+  lr: 1.0e-3
+  reinforce_lr: 1.0e-4
+  n_rollouts: 10
+  grad_clip: 1.0
