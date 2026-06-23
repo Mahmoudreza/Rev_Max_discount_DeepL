@@ -49,47 +49,55 @@ from experiments.run_all_experiments import (
 def _build_graphs(graph_name: str, seed: int):
     """Build test graph and training pool for the requested benchmark graph.
 
-    Training strategy:
-      - rice_facebook: test = real RF graph; train = 15 Forest Fire graphs (n=441)
-        (train on synthetic to test zero-shot transfer to real topology)
-      - ba500/sbm500/plow500: test = one instance; train = 15 same-type instances
-        (in-distribution generalisation across random seeds)
+    Training strategy (keeping training graphs SMALL for speed):
+      - rice_facebook: test = real RF graph (n≈443);
+                       train = 5 Forest Fire graphs at n=150
+                       → zero-shot transfer: policy trained on synthetic, tested on real
+      - ba500/sbm500/plow500: test = one large instance (n=500);
+                       train = 5 same-type graphs at n=150
+                       → fast training, then eval on larger test graph
 
-    Returns (test_graph, train_graphs, graph_label, n).
+    Training on n=150 instead of n=500 gives a ~11× speedup on trajectory
+    caching (O(n²) scaling) while preserving structural similarity.
+
+    Returns (test_graph, train_graphs, graph_label, n_test).
     """
+    TRAIN_N = 150   # small training graphs — fast IE trajectory computation
+    N_TRAIN = 5     # number of training graph instances
+
     if graph_name == "rice_facebook":
         test_graph   = load_rice_facebook(data_dir="data/raw")
-        n            = test_graph.number_of_nodes()
-        # Train on FF graphs of the same size (zero-shot transfer setting)
-        train_graphs = [generate_forest_fire(n, p=0.37, pb=0.32, seed=seed + i)
-                        for i in range(15)]
-        label = f"Rice-Facebook (n={n}, real)"
+        n_test       = test_graph.number_of_nodes()
+        train_graphs = [generate_forest_fire(TRAIN_N, p=0.37, pb=0.32, seed=seed + i)
+                        for i in range(N_TRAIN)]
+        label = f"Rice-Facebook (n={n_test}, real | trained on FF n={TRAIN_N})"
 
     elif graph_name == "ba500":
-        n            = 500
-        test_graph   = generate_ba(n, m=3, seed=9999)
-        train_graphs = [generate_ba(n, m=3, seed=seed + i) for i in range(15)]
-        label = f"BA (n={n}, m=3)"
+        n_test       = 500
+        test_graph   = generate_ba(n_test, m=3, seed=9999)
+        train_graphs = [generate_ba(TRAIN_N, m=3, seed=seed + i)
+                        for i in range(N_TRAIN)]
+        label = f"BA (test n={n_test} | trained on BA n={TRAIN_N})"
 
     elif graph_name == "sbm500":
-        n            = 500
-        test_graph   = generate_sbm(n, n_blocks=5, p_in=0.30, p_out=0.01, seed=9999)
-        train_graphs = [generate_sbm(n, n_blocks=5, p_in=0.30, p_out=0.01, seed=seed + i)
-                        for i in range(15)]
-        label = f"SBM (n={n}, 5 blocks)"
+        n_test       = 500
+        test_graph   = generate_sbm(n_test, n_blocks=5, p_in=0.30, p_out=0.01, seed=9999)
+        train_graphs = [generate_sbm(TRAIN_N, n_blocks=3, p_in=0.30, p_out=0.02, seed=seed + i)
+                        for i in range(N_TRAIN)]
+        label = f"SBM (test n={n_test} | trained on SBM n={TRAIN_N})"
 
     elif graph_name == "plow500":
-        n            = 500
-        test_graph   = generate_power_law_cluster(n, m=3, p=0.6, seed=9999)
-        train_graphs = [generate_power_law_cluster(n, m=3, p=0.6, seed=seed + i)
-                        for i in range(15)]
-        label = f"PLow (n={n}, m=3, p=0.6)"
+        n_test       = 500
+        test_graph   = generate_power_law_cluster(n_test, m=3, p=0.6, seed=9999)
+        train_graphs = [generate_power_law_cluster(TRAIN_N, m=3, p=0.6, seed=seed + i)
+                        for i in range(N_TRAIN)]
+        label = f"PLow (test n={n_test} | trained on PLow n={TRAIN_N})"
 
     else:
         raise ValueError(f"Unknown graph: {graph_name}. "
                          f"Choose from: rice_facebook, ba500, sbm500, plow500, all")
 
-    return test_graph, train_graphs, label, n
+    return test_graph, train_graphs, label, n_test
 
 
 # ── Single-graph benchmark run ────────────────────────────────────────────────
@@ -99,11 +107,12 @@ def run_benchmark_graph(graph_name: str):
 
     Returns results dict: {method_name: revenue}.
     """
-    # Config: demo overrides (n_nodes overridden by actual graph size in generators)
+    # Config: demo overrides — small mc + epochs for interactive speed
+    # Baselines + eval use mc=3; production runs should use mc=20+
     overrides = [
-        "influence.n_mc_samples=5",
-        "training.reinforce_epochs=50",
-        "training.n_train_graphs=15",
+        "influence.n_mc_samples=3",   # 3 MC samples (was 5); enough for ordering
+        "training.reinforce_epochs=30",  # 30 epochs (was 50); fast demo
+        "training.n_train_graphs=5",    # informational; actual count is N_TRAIN=5 in _build_graphs
     ]
     cfg     = load_config_with_base("configs/experiments/rev_gnn_im_rl.yaml",
                                     overrides=overrides)
