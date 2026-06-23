@@ -95,7 +95,8 @@ def _reward_to_go(rewards, gamma=0.99, device="cpu", normalize=True):
 
 # ── Phase 1: Imitation pre-training ───────────────────────────────────────────
 
-def imitation_pretrain(policy, optimizer, cfg, graphs, statics, device, n_epochs):
+def imitation_pretrain(policy, optimizer, cfg, graphs, statics, device, n_epochs,
+                       traj_cache=None):
     """Warm-start JointPolicy using IE-strategy expert trajectories.
 
     Expert: ie_strategy (best Babaei et al. baseline, ~40.73 revenue).
@@ -104,18 +105,17 @@ def imitation_pretrain(policy, optimizer, cfg, graphs, statics, device, n_epochs
       - IE then prices remaining buyers at FULL valuation (discount=0.0)
     The GNN learns this bimodal discount policy: 1.0 for influencers, 0.0 for rest.
 
-    With IE as teacher, after imitation the GNN achieves ~36–40 revenue (vs ~25
-    with greedy_discount teacher). REINFORCE then pushes BEYOND 40.73.
-
-    For each step in the expert trajectory:
-      - Node selection: cross-entropy loss encouraging same node choice
-      - Pricing: MSE loss on discount head to match expert discount
+    traj_cache: optional pre-computed {id(graph): trajectory} dict.
+        Pass this when the same trajectories are shared across training methods
+        (e.g. imitation + GAIL-RL-Rich) so they are computed only once.
+        If None, computed internally.
     """
     # Pre-compute IE trajectories ONCE per training graph.
     # They are deterministic (same graph + same seed → same result), so there
     # is no need to regenerate them each epoch.  Without caching, 35 epochs ×
     # 10 graphs = 350 trajectory computations dominated the demo wall time.
-    traj_cache = {id(g): ie_strategy_trajectory(g, cfg) for g in graphs}
+    if traj_cache is None:
+        traj_cache = {id(g): ie_strategy_trajectory(g, cfg) for g in graphs}
 
     for epoch in range(n_epochs):
         graph = graphs[epoch % len(graphs)]
@@ -340,6 +340,157 @@ def train_lstm_policy(lstm_policy, cfg, graphs, device, n_epochs):
     return lstm_policy
 
 
+# ── GAIL-RL-Rich ──────────────────────────────────────────────────────────────
+
+def _encode_gail_action(h, node_idx, discount_val, device):
+    """Encode (mean-graph-state, node-emb, discount) for GAIL discriminator.
+
+    Input to discriminator = cat([mean(h), h[node_idx], [discount]]).
+    Both expert and agent steps share the SAME encoder (current policy weights),
+    so the discriminator learns a content-based rather than representation-based
+    distinction — it must separate bimodal {0,1} discounts (expert) from soft
+    sigmoid values (agent), which naturally pushes agent toward bimodal pricing.
+    """
+    global_state = h.mean(dim=0)                                  # (hidden_dim,)
+    node_emb     = h[node_idx]                                    # (hidden_dim,)
+    d = torch.tensor([float(discount_val)], dtype=torch.float32, device=device)
+    return global_state, node_emb, d
+
+
+def train_gail_rl_rich(im_policy, cfg, graphs, traj_cache, statics, device, n_epochs):
+    """GAIL-RL-Rich: adversarial fine-tuning from the IE-imitation warm-start.
+
+    Starts from the same `im_policy` checkpoint as Rev-GNN (IM+RL) for a fair
+    comparison — only the fine-tuning signal differs (adversarial GAIL here vs
+    REINFORCE in Rev-GNN).
+
+    Training loop per epoch:
+      1. Agent rollout       — collect (states, actions, shaped rewards)
+      2. Expert re-encoding  — replay IE traj through CURRENT encoder
+      3. Discriminator step  — BCE loss: expert→1, agent→0
+      4. Generator step      — GAIL reward + revenue shaping + cascade bonus
+
+    Rich reward (per step):
+      r = -log(1 - D(s,a))   [GAIL adversarial — dense, drives bimodal pricing]
+        + 0.1 × revenue(t)    [sparse revenue signal]
+        + 0.05 × |ΔS|         [cascade-spread bonus per newly influenced node]
+
+    The GAIL discriminator receives expert discounts ∈ {0.0, 1.0} vs agent
+    discounts ∈ (0.1, 0.9).  It trivially learns to distinguish by extremity;
+    the GAIL reward then pushes the agent to make its discounts more extreme —
+    which is exactly the bimodal pricing we want.  This complements, rather
+    than competes with, the 0.5-threshold discrete-pricing eval trick.
+    """
+    from src.training.gail_trainer import GAILDiscriminator
+
+    gail_policy  = copy.deepcopy(im_policy)
+    hidden_dim   = cfg.encoder.hidden_dim
+    discriminator = GAILDiscriminator(hidden_dim=hidden_dim).to(device)
+
+    # Use very conservative generator LR to preserve the IM warm-start representations
+    gen_lr  = getattr(cfg.training, 'gail_lr_gen',  1e-4) * 0.5
+    disc_lr = getattr(cfg.training, 'gail_lr_disc', 1e-4)
+    gen_opt  = torch.optim.Adam(gail_policy.parameters(),   lr=gen_lr)
+    disc_opt = torch.optim.Adam(discriminator.parameters(), lr=disc_lr)
+
+    for epoch in range(n_epochs):
+        graph  = graphs[epoch % len(graphs)]
+        static = statics[id(graph)]
+        n      = graph.number_of_nodes()
+        nodes  = list(graph.nodes())
+
+        # ── 1. Collect AGENT rollout (no_grad, store tensors for later backprop) ──
+        agent_steps = []
+        env = _make_env(graph, cfg); env.reset()
+        with torch.no_grad():
+            for _ in range(n):
+                available = env.available_nodes
+                if not available: break
+                feats = compute_node_features(graph=graph, static_features=static,
+                    S=frozenset(env.S), offered=frozenset(env.offered),
+                    t=env.t, n=n, k=n, env=env)
+                data = graph_to_pyg_data(graph, feats, device)
+                mask = get_available_mask(n, frozenset(env.offered), nodes, device)
+                node_idx, discount, _ = gail_policy.select_and_price(
+                    data.x, data.edge_index, mask, greedy=False)
+                h = gail_policy.encoder(data.x, data.edge_index)
+                prev_s = len(env.S)
+                if node_idx not in available:
+                    node_idx = available[0]
+                _, rev, done, _ = env.step(node_idx, discount)
+                agent_steps.append(dict(
+                    x=data.x.detach(), ei=data.edge_index, mask=mask,
+                    h=h.detach(), node_idx=node_idx, discount=discount,
+                    rev=rev, cascade=len(env.S) - prev_s,
+                ))
+                if done: break
+
+        # ── 2. Re-encode EXPERT steps using CURRENT policy encoder ─────────────
+        # Re-encoding is necessary because the policy weights changed last epoch;
+        # both expert and agent representations must live in the same space so
+        # the discriminator cannot cheat by detecting representation drift.
+        expert_demos = []
+        exp_env = _make_env(graph, cfg); exp_env.reset()
+        for exp_idx, exp_disc, _ in traj_cache[id(graph)]:
+            feats = compute_node_features(graph=graph, static_features=static,
+                S=frozenset(exp_env.S), offered=frozenset(exp_env.offered),
+                t=exp_env.t, n=n, k=n, env=exp_env)
+            data_e = graph_to_pyg_data(graph, feats, device)
+            with torch.no_grad():
+                h_e = gail_policy.encoder(data_e.x, data_e.edge_index)
+            gs, ne, d = _encode_gail_action(h_e, exp_idx, float(exp_disc), device)
+            expert_demos.append((gs.detach(), ne.detach(), d.detach()))
+            exp_env.step(exp_idx, float(exp_disc))
+
+        # ── 3. Discriminator update (expert=1, agent=0) ──────────────────────
+        d_losses = []
+        for a_step, (e_gs, e_ne, e_d) in zip(
+                agent_steps[:len(expert_demos)], expert_demos):
+            gs_a, ne_a, d_a = _encode_gail_action(
+                a_step['h'], a_step['node_idx'], a_step['discount'], device)
+            d_exp   = discriminator(e_gs, e_ne, e_d)
+            d_agent = discriminator(gs_a, ne_a, d_a)
+            d_losses.append(
+                F.binary_cross_entropy(d_exp,   torch.ones(1,  device=device)) +
+                F.binary_cross_entropy(d_agent, torch.zeros(1, device=device))
+            )
+        if d_losses:
+            disc_opt.zero_grad()
+            torch.stack(d_losses).mean().backward()
+            disc_opt.step()
+
+        # ── 4. Generator update: GAIL adversarial + revenue + cascade shaping ─
+        g_losses = []
+        for a_step in agent_steps:
+            # Re-compute log-prob WITH gradient for the stored action
+            _, _, lp = gail_policy.select_and_price(
+                a_step['x'], a_step['ei'], a_step['mask'], greedy=False)
+            h_new = gail_policy.encoder(a_step['x'], a_step['ei'])
+            gs, ne, d = _encode_gail_action(
+                h_new, a_step['node_idx'], a_step['discount'], device)
+            d_pred = discriminator(gs, ne, d)
+
+            # GAIL adversarial reward — dense per-step, drives bimodal pricing
+            gail_r = -torch.log(1.0 - d_pred.squeeze() + 1e-8).detach()
+            # Revenue shaping: 0.1× actual step revenue
+            rev_r  = torch.tensor(a_step['rev'] * 0.1,
+                                  dtype=torch.float32, device=device)
+            # Cascade-spread bonus: 0.05 per newly influenced node
+            cas_r  = torch.tensor(a_step['cascade'] * 0.05,
+                                  dtype=torch.float32, device=device)
+            total_r = (gail_r + rev_r + cas_r).detach()
+            g_losses.append(-lp * total_r)
+
+        if g_losses:
+            gen_opt.zero_grad()
+            torch.stack(g_losses).mean().backward()
+            torch.nn.utils.clip_grad_norm_(
+                gail_policy.parameters(), cfg.training.grad_clip)
+            gen_opt.step()
+
+    return gail_policy
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -379,39 +530,36 @@ def main():
         results[k] = v
         logger.info(f"  {k:25s}: {v:.4f}")
 
-    # 2. Rev-GNN: Phase 1 imitation only ──────────────────────────────────────
-    logger.info("\n=== Rev-GNN (Imitation only — before any RL) ===")
+    # 2. Shared IM warm-start (checkpoint reused by both Rev-GNN and GAIL-RL-Rich) ──
+    # Pre-compute IE trajectories once — shared by imitation AND GAIL expert replay.
+    # This avoids a second O(k·n·MC) pass during GAIL's expert-demo collection.
+    logger.info("\n=== Shared IM warm-start (IE expert, 100 epochs, traj caching) ===")
     enc = GraphSAGEEncoder(
         in_dim=cfg.features.dim, hidden_dim=cfg.encoder.hidden_dim,
         n_layers=cfg.encoder.n_layers, dropout=cfg.encoder.dropout,
     ).to(device)
-    im_policy = JointPolicy(enc, hidden_dim=cfg.encoder.hidden_dim).to(device)
+    im_policy  = JointPolicy(enc, hidden_dim=cfg.encoder.hidden_dim).to(device)
     im_statics = {id(g): compute_static_features(g) for g in train_graphs}
-    # IE trajectories are cached above so more imitation epochs are now cheap.
-    # Use 2× the total budget for imitation: with caching this finishes in similar
-    # wall time as the old non-cached 35-epoch run, but sees 100 gradient updates.
-    n_imitation = max(10, cfg.training.reinforce_epochs * 2)  # 100 for n_epochs=50
+    traj_cache = {id(g): ie_strategy_trajectory(g, cfg) for g in train_graphs}
+    n_imitation = max(10, cfg.training.reinforce_epochs * 2)  # 100 for demo
     opt_im = torch.optim.Adam(im_policy.parameters(), lr=cfg.training.reinforce_lr)
-    imitation_pretrain(im_policy, opt_im, cfg, train_graphs, im_statics, device, n_imitation)
-    results["Rev-GNN-IM"] = eval_joint(im_policy, test_graph, test_static, cfg, device)
-    logger.info(f"  {'Rev-GNN-IM':25s}: {results['Rev-GNN-IM']:.4f}")
+    imitation_pretrain(im_policy, opt_im, cfg, train_graphs, im_statics, device,
+                       n_imitation, traj_cache=traj_cache)
+    logger.info(f"  IM warm-start complete ({n_imitation} epochs, IE teacher)")
 
     # 3. Rev-GNN (IM checkpoint → REINFORCE fine-tuning) ─────────────────────
-    # Deep-copy im_policy so Rev-GNN starts from the same 25.87 checkpoint.
-    # This eliminates random-init variance and makes the comparison fair.
-    # Rev-GNN then does `rl_epochs` steps of REINFORCE at low LR on top.
-    logger.info("\n=== Rev-GNN (IM checkpoint → REINFORCE fine-tuning) ===")
+    # Deep-copy im_policy so Rev-GNN starts from the shared IM checkpoint.
+    # This eliminates random-init variance and makes the comparison with GAIL fair.
+    logger.info("\n=== Rev-GNN (IM+RL): IM checkpoint → REINFORCE fine-tuning ===")
     gnn_policy = copy.deepcopy(im_policy)
-    rl_statics = {id(g): compute_static_features(g) for g in train_graphs}
-    # n_imitation can exceed n_epochs (caching makes it cheap), so always run
-    # at least cfg.training.reinforce_epochs RL steps regardless of the ratio.
-    rl_epochs = max(cfg.training.reinforce_epochs, 20)  # 50 for demo
+    # Reuse im_statics — no need to recompute betweenness/pagerank a second time.
+    rl_epochs    = max(cfg.training.reinforce_epochs, 20)  # 50 for demo
     rl_optimizer = torch.optim.Adam(gnn_policy.parameters(),
                                     lr=cfg.training.reinforce_lr * 0.3)
-    rl_baseline = 0.0
+    rl_baseline  = 0.0
     for epoch in range(rl_epochs):
-        graph = train_graphs[epoch % len(train_graphs)]
-        static = rl_statics[id(graph)]
+        graph  = train_graphs[epoch % len(train_graphs)]
+        static = im_statics[id(graph)]          # reuse shared statics
         log_probs, rewards, _ = _rollout_joint(
             gnn_policy, graph, static, cfg, device, greedy=False)
         returns = _reward_to_go(rewards, gamma=0.99, device=device, normalize=True)
@@ -422,8 +570,18 @@ def main():
         rl_optimizer.zero_grad(); loss.backward()
         torch.nn.utils.clip_grad_norm_(gnn_policy.parameters(), cfg.training.grad_clip)
         rl_optimizer.step()
-    results["Rev-GNN"] = eval_joint(gnn_policy, test_graph, test_static, cfg, device)
-    logger.info(f"  {'Rev-GNN':25s}: {results['Rev-GNN']:.4f}")
+    results["Rev-GNN (IM+RL)"] = eval_joint(gnn_policy, test_graph, test_static, cfg, device)
+    logger.info(f"  {'Rev-GNN (IM+RL)':25s}: {results['Rev-GNN (IM+RL)']:.4f}")
+
+    # 3B. GAIL-RL-Rich (IM checkpoint → GAIL adversarial fine-tuning) ──────────
+    # Starts from the SAME im_policy checkpoint → fair comparison with Rev-GNN.
+    # Uses the same traj_cache for expert demos → no extra trajectory computation.
+    logger.info("\n=== GAIL-RL-Rich (IM checkpoint + adversarial fine-tune) ===")
+    gail_policy = train_gail_rl_rich(
+        im_policy, cfg, train_graphs, traj_cache, im_statics, device,
+        n_epochs=rl_epochs)
+    results["GAIL-RL-Rich"] = eval_joint(gail_policy, test_graph, test_static, cfg, device)
+    logger.info(f"  {'GAIL-RL-Rich':25s}: {results['GAIL-RL-Rich']:.4f}")
 
     # 4. Rev-GNN-LSTM (IM encoder → LSTM REINFORCE) ──────────────────────────
     # Deep-copy the trained encoder `enc` so the LSTM policy starts with a
