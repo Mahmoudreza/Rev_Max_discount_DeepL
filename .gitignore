@@ -6,6 +6,8 @@ data/raw/*
 data/processed/*
 data/graphs/*
 !data/raw/.gitkeep
+!data/raw/rice-facebook-undergrads-links.txt
+!data/raw/rice-facebook-undergrads-users.txt
 !data/processed/.gitkeep
 !data/graphs/.gitkeep
 results/checkpoints/*
