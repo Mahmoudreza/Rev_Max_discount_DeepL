@@ -111,6 +111,29 @@ checkpointing:
   mode: "max"
   checkpoint_dir: "results/checkpoints"
 
+# ── Sequence model (LSTM / Transformer memory) ───────────────────────────────
+sequence_model:
+  lstm_hidden: 64
+  lstm_n_layers: 1
+  transformer_d_model: 64
+  transformer_n_heads: 4
+  transformer_n_layers: 2
+
+# ── External & WSDM baseline checkpoints ─────────────────────────────────────
+baselines:
+  # ToupleGDD / S2V-DQN — pretrained external models
+  # Set touple_gdd_dir to the absolute path of the ToupleGDD codebase root
+  touple_gdd_dir: "/Users/reza/Desktop/influence_maximization/external_baselines/ToupleGDD"
+  s2v_dqn_checkpoint: "s2vdqn.ckpt"           # relative to touple_gdd_dir
+  touple_gdd_checkpoint: "tripling.ckpt"       # relative to touple_gdd_dir
+
+  # DGN (Wang et al. 2024) — checkpoint not yet available
+  dgn_checkpoint: "checkpoints/external/dgn.pt"
+
+  # WSDM 2027 GNN-IM-RL + GAIL-RL-Rich (our own, trained separately)
+  wsdm_gnn_checkpoint: "checkpoints/wsdm/gnn_im_rl.pt"
+  wsdm_gail_checkpoint: "checkpoints/wsdm/gail_rl_rich.pt"
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   use_wandb: false
