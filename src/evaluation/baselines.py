@@ -636,7 +636,7 @@ def _call_touplegdd_shim(
             ["python", "touplegdd_seed_printer.py",
              tmp_path, model_name, ckpt_path, str(budget)],
             cwd=touple_dir,
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=300,
         )
         if result.returncode != 0:
             warnings.warn(f"[Group-2] {model_name} subprocess error: "
