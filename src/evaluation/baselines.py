@@ -64,6 +64,32 @@ def _override_seed(cfg, new_seed: int):
     return OmegaConf.merge(cfg, OmegaConf.create({"project": {"seed": new_seed}}))
 
 
+def _seed_top_k_by_degree(graph: nx.Graph, env: RevenueEnv, k: int) -> List:
+    """Give the top-k highest-degree nodes as FREE seeds (revenue = 0).
+
+    Adds them to env.S, env.offered; clears influence cache.
+    Used as the seeding phase for µ/σ/greedy-discount baselines so that
+    all methods compete under the same seed-budget constraint.
+
+    Args:
+        graph: NetworkX graph.
+        env:   RevenueEnv (already reset).
+        k:     Seed budget.
+
+    Returns:
+        List of seeded nodes (in degree-descending order).
+    """
+    degrees = dict(graph.degree())
+    sorted_nodes = sorted(graph.nodes(), key=lambda v: degrees[v], reverse=True)
+    seeds = sorted_nodes[:min(k, graph.number_of_nodes())]
+    for node in seeds:
+        env.S.add(node)
+        env.offered.add(node)
+        env.t += 1
+    env._influence_cache = {}
+    return seeds
+
+
 def _greedy_seed_selection(graph: nx.Graph, env: RevenueEnv, k: int) -> List:
     """Greedy hill-climbing seed selection by marginal influence gain.
 
@@ -151,9 +177,15 @@ def ie_strategy(graph: nx.Graph, cfg) -> float:
 def mu_discount(graph: nx.Graph, cfg) -> float:
     """µ-Discount (Babaei et al. 2013, Section 4.1).
 
-    Sorts buyers by degree (high → low).  The discount for rank j is:
+    Pure pricing strategy — no seeding phase (k-independent, per Babaei 2013).
+    Sorts ALL buyers by degree (high → low).  The discount for rank j is:
         d(j) = max(0,  1 − j / µ)    where µ = mean degree.
-    Higher-degree buyers get less discount (higher price).
+
+    Note:
+        This method does not use cfg.budget.k — it prices all n nodes.
+        Revenue is identical across different k values by design.
+        This is a feature (not a bug): it shows the limitation of methods
+        that don't exploit the seed budget.
 
     Args:
         graph: Social network graph.
@@ -189,10 +221,14 @@ def mu_discount(graph: nx.Graph, cfg) -> float:
 def sigma_discount(graph: nx.Graph, cfg) -> float:
     """σ-Discount (Babaei et al. 2013, Section 4.2.1).
 
+    Pure pricing strategy — no seeding phase (k-independent, per Babaei 2013).
     Uses mean (µ) and std dev (σ) of degree to set three discount tiers:
       deg > µ+σ  → 65%  discount (super-influencer)
       µ < deg   → 35%  discount (above average)
       else       → 10%  discount
+
+    Note:
+        k-independent by design (prices all n nodes regardless of budget).
 
     Args:
         graph: Social network graph.
@@ -238,9 +274,13 @@ def sigma_discount(graph: nx.Graph, cfg) -> float:
 def greedy_discount(graph: nx.Graph, cfg) -> float:
     """Greedy degree-based discount (Babaei et al. 2013, Section 4.2).
 
+    Pure pricing strategy — no seeding phase (k-independent, per Babaei 2013).
     6 influence regions by degree quartile.  At each step offers the
     highest-current-valuation buyer at the discount for their region.
     Also used as the GAIL expert teacher.
+
+    Note:
+        k-independent by design (prices all n nodes regardless of budget).
 
     Args:
         graph: Social network graph.
@@ -510,22 +550,27 @@ def run_all_baselines(graph, cfg, n_trials=10):
 # ════════════════════════════════════════════════════════════════════════════════
 
 def _apply_greedy_pricing_to_order(graph: nx.Graph, cfg, node_order: List) -> float:
-    """Apply greedy_discount pricing to a fixed node visitation order.
+    """Give first k nodes FREE, then apply greedy_discount pricing to the rest.
 
-    The GNN provides the ordering; revenue comes from greedy_discount pricing.
-    This evaluates the seed-selection ability of a deep IM model decoupled from pricing.
+    node_order comes from a deep IM model (S2V-DQN / ToupleGDD):
+      - node_order[:k]  = GNN-selected seeds → given for free (revenue = 0)
+      - node_order[k:]  = remaining buyers   → greedy 6-region discount pricing
+
+    This mirrors the seeding phase used in the Babaei methods so that all
+    baselines compete under the same budget-k constraint.
 
     Args:
         graph:      Social network graph.
-        cfg:        OmegaConf DictConfig.
-        node_order: Node visit order (network node IDs, length n).
+        cfg:        OmegaConf DictConfig (uses cfg.budget.k).
+        node_order: Full node visit order (length n): seeds first, then rest.
 
     Returns:
-        Total revenue.
+        Total revenue (seeds contribute 0).
     """
     env = _make_env(graph, cfg)
     env.reset()
 
+    k = cfg.budget.k
     n = env.n
     degrees = dict(graph.degree())
     sorted_degrees = sorted(degrees.values(), reverse=True)
@@ -536,7 +581,19 @@ def _apply_greedy_pricing_to_order(graph: nx.Graph, cfg, node_order: List) -> fl
     total_revenue = 0.0
     offered_set: set = set()
 
-    for node in node_order:
+    # Phase 1: k seeds → free (add to S for influence, no revenue charge)
+    for node in node_order[:k]:
+        if node in offered_set:
+            continue
+        env.S.add(node)
+        env._influence_cache = {}
+        offered_set.add(node)
+        env.offered.add(node)
+        env.t += 1
+    env._influence_cache = {}   # flush once after all seeds are added
+
+    # Phase 2: remaining n-k nodes → greedy 6-region discount pricing
+    for node in node_order[k:]:
         if node in offered_set:
             continue
         val = env._compute_valuation(node)
