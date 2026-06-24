@@ -260,7 +260,8 @@ def ie_strategy(graph: nx.Graph, cfg, return_stats: bool = False):
     Phase 1: Greedy seed selection — give k nodes for FREE (revenue = 0).
     Phase 2: Offer remaining n-k buyers at their exact current valuation (myopic).
 
-    Uses n_mc_samples=max(cfg, 500) for accurate valuation estimates.
+    Uses cfg.influence.n_mc_samples for valuation estimates (consistent with
+    other Babaei baselines — 96.9% acceptance observed on rice_facebook).
 
     Args:
         graph:        Social network graph.
@@ -270,11 +271,7 @@ def ie_strategy(graph: nx.Graph, cfg, return_stats: bool = False):
     Returns:
         float (default) or dict with revenue, n_offered, n_accepted, etc.
     """
-    # Use higher MC sample count for accurate myopic valuation estimates
-    from omegaconf import OmegaConf as _OC
-    _n_mc = max(int(cfg.influence.n_mc_samples), 500)
-    _cfg_ie = _OC.merge(cfg, _OC.create({"influence": {"n_mc_samples": _n_mc}}))
-    env = _make_env(graph, _cfg_ie)
+    env = _make_env(graph, cfg)
     env.reset()
 
     k = cfg.budget.k
