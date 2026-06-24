@@ -254,20 +254,27 @@ def _compute_k1_k2(
 # GROUP 1 — Babaei et al. (2013)
 # ════════════════════════════════════════════════════════════════════════════════
 
-def ie_strategy(graph: nx.Graph, cfg) -> float:
+def ie_strategy(graph: nx.Graph, cfg, return_stats: bool = False):
     """Influence-and-Exploit (Babaei et al. 2013).
 
     Phase 1: Greedy seed selection — give k nodes for FREE (revenue = 0).
-    Phase 2: Offer remaining buyers at their exact current valuation (myopic).
+    Phase 2: Offer remaining n-k buyers at their exact current valuation (myopic).
+
+    Uses n_mc_samples=max(cfg, 500) for accurate valuation estimates.
 
     Args:
-        graph: Social network graph.
-        cfg:   OmegaConf DictConfig.
+        graph:        Social network graph.
+        cfg:          OmegaConf DictConfig.
+        return_stats: If True, return stats dict instead of float.
 
     Returns:
-        Total revenue.
+        float (default) or dict with revenue, n_offered, n_accepted, etc.
     """
-    env = _make_env(graph, cfg)
+    # Use higher MC sample count for accurate myopic valuation estimates
+    from omegaconf import OmegaConf as _OC
+    _n_mc = max(int(cfg.influence.n_mc_samples), 500)
+    _cfg_ie = _OC.merge(cfg, _OC.create({"influence": {"n_mc_samples": _n_mc}}))
+    env = _make_env(graph, _cfg_ie)
     env.reset()
 
     k = cfg.budget.k
@@ -278,150 +285,189 @@ def ie_strategy(graph: nx.Graph, cfg) -> float:
         env.offered.add(node)
 
     total_revenue = 0.0
+    n_offered = 0
+    n_accepted = 0
     for node in nodes:
         if node in env.offered:
             continue
         valuation = env._compute_valuation(node)
+        n_offered += 1
         if valuation > 0:
             total_revenue += valuation
+            n_accepted += 1
         env.offered.add(node)
 
+    if return_stats:
+        return {
+            "revenue": total_revenue,
+            "n_offered": n_offered,
+            "n_accepted": n_accepted,
+            "acceptance_rate": n_accepted / max(1, n_offered),
+            "avg_price": total_revenue / max(1, n_accepted),
+        }
     return total_revenue
 
 
-def mu_discount(graph: nx.Graph, cfg) -> float:
+def mu_discount(graph: nx.Graph, cfg, return_stats: bool = False):
     """µ-Discount (Babaei et al. 2013, Section 4.1).
 
-    Sorts buyers by degree (high → low) and makes up to k offers.
-    The discount for rank j is:
+    Sorts ALL n buyers by degree (high → low) and offers each a discount:
         d(j) = max(0,  1 − j / µ)    where µ = mean degree.
 
-    Revenue increases with k since more buyers are offered (k=5 → 5 offers,
-    k=30 → 30 offers).
+    k (cfg.budget.k) is NOT used — µ-Discount runs on ALL n buyers.
+    Revenue is therefore k-independent (flat line in budget sweep).
 
     Args:
-        graph: Social network graph.
-        cfg:   OmegaConf config.
+        graph:        Social network graph.
+        cfg:          OmegaConf config.
+        return_stats: If True, return stats dict instead of float.
 
     Returns:
-        Total revenue from up to k offers.
+        float (default) or dict with revenue, n_offered, n_accepted, etc.
     """
     env = _make_env(graph, cfg)
     env.reset()
 
-    k = cfg.budget.k
     degrees = dict(graph.degree())
     mu = float(np.mean(list(degrees.values())))
     sorted_nodes = sorted(env.nodes, key=lambda v: degrees[v], reverse=True)
     total_revenue = 0.0
+    n_offered = 0
+    n_accepted = 0
 
     for j, node in enumerate(sorted_nodes):
-        if j >= k:
-            break
         discount = max(0.0, min(1.0, 1.0 - float(j) / mu)) if mu > 0 else 0.0
         valuation = env._compute_valuation(node)
         offered_price = valuation * (1.0 - discount)
+        n_offered += 1
 
         if valuation >= offered_price:
             env.S.add(node)
             env._influence_cache = {}
             total_revenue += offered_price
+            n_accepted += 1
 
         env.offered.add(node)
         env.t += 1
 
+    if return_stats:
+        return {
+            "revenue": total_revenue,
+            "n_offered": n_offered,
+            "n_accepted": n_accepted,
+            "acceptance_rate": n_accepted / max(1, n_offered),
+            "avg_price": total_revenue / max(1, n_accepted),
+        }
     return total_revenue
 
 
-def sigma_discount(graph: nx.Graph, cfg) -> float:
+def sigma_discount(graph: nx.Graph, cfg, return_stats: bool = False):
     """σ-Discount (Babaei et al. 2013, Section 4.2.1).
 
-    Uses mean (µ) and std dev (σ) of degree to set three discount tiers,
-    and makes up to k offers (high-degree first):
-      deg > µ+σ  → 65%  discount (super-influencer)
-      µ < deg   → 35%  discount (above average)
-      else       → 10%  discount
+    Offers ALL n buyers (sorted by degree, high → low) with 3-tier Rayleigh
+    pricing based on degree thresholds (Babaei 2013 Section 4.2.1):
 
-    Revenue increases with k since more buyers are offered.
+      deg > µ+σ         → FREE (super-influencer: joins S, influences others)
+      µ < deg ≤ µ+σ     → price = f(1/6) ≈ 0.315  (above-average influencer)
+      deg ≤ µ           → price = f(2/6) ≈ 0.534  (average/below-average buyer)
+
+    k (cfg.budget.k) is NOT used — σ-Discount runs on ALL n buyers.
+    Revenue is k-independent (flat line in budget sweep).
+
+    Expected ordering (Babaei 2013 Figure 3):
+      Greedy-Discount > σ-Discount > µ-Discount > IE-Strategy (at small k)
 
     Args:
-        graph: Social network graph.
-        cfg:   OmegaConf config.
+        graph:        Social network graph.
+        cfg:          OmegaConf config.
+        return_stats: If True, return stats dict instead of float.
 
     Returns:
-        Total revenue from up to k offers.
+        float (default) or dict with revenue, n_offered, n_accepted, etc.
     """
     env = _make_env(graph, cfg)
     env.reset()
 
-    k = cfg.budget.k
     degrees = dict(graph.degree())
     deg_values = np.array(list(degrees.values()), dtype=float)
     mu = float(np.mean(deg_values))
     sigma = float(np.std(deg_values))
+    b = float(cfg.influence.b)
+    lw = env._link_weights
     sorted_nodes = sorted(env.nodes, key=lambda v: degrees[v], reverse=True)
     total_revenue = 0.0
+    n_offered = 0
+    n_accepted = 0
 
-    for offers_made, node in enumerate(sorted_nodes):
-        if offers_made >= k:
-            break
+    for node in sorted_nodes:
         deg = degrees[node]
         valuation = env._compute_valuation(node)
+        n_offered += 1
 
         if deg > mu + sigma:
-            discount = 0.65
+            price = 0.0                            # FREE — super-influencer seed
         elif deg > mu:
-            discount = 0.35
+            price = _rayleigh_price(1.0 / 6.0, b) # above-average → f(1/6)≈0.315
         else:
-            discount = 0.10
+            price = _rayleigh_price(2.0 / 6.0, b) # rest → f(2/6)≈0.534
 
-        offered_price = valuation * (1.0 - discount)
-        if valuation >= offered_price:
+        if price == 0.0:
             env.S.add(node)
             env._influence_cache = {}
-            if offered_price > 0:
-                total_revenue += offered_price
+        elif valuation >= price:
+            env.S.add(node)
+            env._influence_cache = {}
+            total_revenue += price
+            n_accepted += 1
 
         env.offered.add(node)
         env.t += 1
 
+    if return_stats:
+        return {
+            "revenue": total_revenue,
+            "n_offered": n_offered,
+            "n_accepted": n_accepted,
+            "acceptance_rate": n_accepted / max(1, n_offered),
+            "avg_price": total_revenue / max(1, n_accepted),
+        }
     return total_revenue
 
 
-def greedy_discount(graph: nx.Graph, cfg) -> float:
-    """Greedy degree-based discount (Babaei et al. 2013, Section 4.2).
+def greedy_discount(graph: nx.Graph, cfg, return_stats: bool = False):
+    """Greedy influence-tier discount (Babaei et al. 2013, Section 4.2).
 
-    At each of k steps selects the highest-valuation remaining buyer (greedy),
-    then prices them based on their CURRENT normalised influence:
+    Iterates over ALL n buyers, selecting the highest-valuation remaining
+    buyer at each step (greedy), then prices based on CURRENT influence:
 
-      influence < 2/6  → FREE (too little influence; seed to build cascade)
-      2/6 ≤ infl < 4/6 → offered at Rayleigh price f(1/6) ≈ 0.315
-      influence ≥ 4/6  → offered at Rayleigh price f(2/6) ≈ 0.533
+      influence < 2/6  → FREE (too little influence; seeds the cascade)
+      2/6 ≤ infl < 4/6 → Rayleigh price f(2/6) ≈ 0.534 (tier lower bound)
+      influence ≥ 4/6  → Rayleigh price f(4/6) ≈ 0.548 (tier lower bound)
 
-    Dynamic pricing at offer-time ensures k1 (free seeds) emerges naturally
-    from the graph topology, and avoids the k1 > k degeneracy that occurs
-    when k1 is pre-computed globally on small/dense graphs.
+    k (cfg.budget.k) is NOT used — Greedy-Discount runs on ALL n buyers.
+    Revenue is k-independent (flat line in budget sweep).
 
-    Revenue increases monotonically with k.
     Also used as the GAIL expert teacher (see greedy_discount_trajectory).
 
     Args:
-        graph: Social network graph.
-        cfg:   OmegaConf config.
+        graph:        Social network graph.
+        cfg:          OmegaConf config.
+        return_stats: If True, return stats dict instead of float.
 
     Returns:
-        Total revenue from up to k offers.
+        float (default) or dict with revenue, n_offered, n_accepted, etc.
     """
     env = _make_env(graph, cfg)
     env.reset()
 
-    k = cfg.budget.k
     b = float(cfg.influence.b)
     lw = env._link_weights
     offered_set: set = set()
     total_revenue = 0.0
+    n_offered = 0
+    n_accepted = 0
 
-    for _ in range(k):
+    for _ in range(env.n):
         remaining = [v for v in env.nodes if v not in offered_set]
         if not remaining:
             break
@@ -434,13 +480,13 @@ def greedy_discount(graph: nx.Graph, cfg) -> float:
             price = 0.0                           # FREE — below threshold
         elif infl < 4.0 / 6.0:
             # Tier-1 price = lower boundary of tier: f(2/6) ≈ 0.534
-            # ensures ALL buyers with influence in [2/6, 4/6) accept
             price = _rayleigh_price(2.0 / 6.0, b)
         else:
             # Tier-2 price = lower boundary of tier: f(4/6) ≈ 0.548
             price = _rayleigh_price(4.0 / 6.0, b)
 
         valuation = env._compute_valuation(target)
+        n_offered += 1
 
         if price == 0.0:
             env.S.add(target)
@@ -449,11 +495,20 @@ def greedy_discount(graph: nx.Graph, cfg) -> float:
             env.S.add(target)
             env._influence_cache = {}
             total_revenue += price
+            n_accepted += 1
 
         offered_set.add(target)
         env.offered.add(target)
         env.t += 1
 
+    if return_stats:
+        return {
+            "revenue": total_revenue,
+            "n_offered": n_offered,
+            "n_accepted": n_accepted,
+            "acceptance_rate": n_accepted / max(1, n_offered),
+            "avg_price": total_revenue / max(1, n_accepted),
+        }
     return total_revenue
 
 
@@ -657,6 +712,45 @@ def run_all_babaei(
     return results
 
 
+def run_all_babaei_stats(
+    graph: nx.Graph,
+    cfg,
+    n_trials: int = 5,
+) -> Dict[str, dict]:
+    """Run all 4 Babaei baselines and return detailed per-method stats.
+
+    Each stat is averaged over n_trials MC link-weight samples.
+
+    Args:
+        graph:    Social network graph.
+        cfg:      OmegaConf DictConfig.
+        n_trials: Monte Carlo trials.
+
+    Returns:
+        Dict: method → {revenue, n_offered, n_accepted, acceptance_rate, avg_price}
+    """
+    methods = {
+        "ie_strategy":     ie_strategy,
+        "mu_discount":     mu_discount,
+        "sigma_discount":  sigma_discount,
+        "greedy_discount": greedy_discount,
+    }
+    results: Dict[str, dict] = {}
+    for name, fn in methods.items():
+        trial_stats = []
+        for t in range(n_trials):
+            s = fn(graph, _override_seed(cfg, cfg.project.seed + t), return_stats=True)
+            trial_stats.append(s)
+        results[name] = {
+            "revenue":         float(np.mean([s["revenue"]         for s in trial_stats])),
+            "n_offered":       float(np.mean([s["n_offered"]       for s in trial_stats])),
+            "n_accepted":      float(np.mean([s["n_accepted"]      for s in trial_stats])),
+            "acceptance_rate": float(np.mean([s["acceptance_rate"] for s in trial_stats])),
+            "avg_price":       float(np.mean([s["avg_price"]       for s in trial_stats])),
+        }
+    return results
+
+
 # Backwards compatibility alias
 def run_all_baselines(graph, cfg, n_trials=10):
     """Alias for run_all_babaei (kept for test compatibility)."""
@@ -691,15 +785,11 @@ def _apply_greedy_pricing_to_order(graph: nx.Graph, cfg, node_order: List) -> fl
     env = _make_env(graph, cfg)
     env.reset()
 
-    k = cfg.budget.k
     b = float(cfg.influence.b)
     lw = env._link_weights
     total_revenue = 0.0
 
     for i, node in enumerate(node_order):
-        if i >= k:
-            break
-
         infl = _compute_normalized_infl(graph, node, env.S, lw)
 
         if infl < 2.0 / 6.0:
