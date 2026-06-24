@@ -64,6 +64,23 @@ def _override_seed(cfg, new_seed: int):
     return OmegaConf.merge(cfg, OmegaConf.create({"project": {"seed": new_seed}}))
 
 
+def _invalidate_caches(env, node) -> None:
+    """Selective cache invalidation: only neighbours of the accepted node.
+
+    Replaces the O(n^2)-per-run full-clear with an O(degree) per-step clear.
+    Must be called whenever a node is accepted and added to env.S.
+
+    Args:
+        env:  RevenueEnv instance.
+        node: The node that was just accepted (joined S).
+    """
+    for _nb in env.graph.neighbors(node):
+        env._influence_cache.pop(_nb, None)
+        env._true_val_cache.pop(_nb, None)
+        env._est_val_cache.pop(_nb, None)
+
+
+
 def _seed_top_k_by_degree(graph: nx.Graph, env: RevenueEnv, k: int) -> List:
     """Give the top-k highest-degree nodes as FREE seeds (revenue = 0).
 
@@ -84,9 +101,9 @@ def _seed_top_k_by_degree(graph: nx.Graph, env: RevenueEnv, k: int) -> List:
     seeds = sorted_nodes[:min(k, graph.number_of_nodes())]
     for node in seeds:
         env.S.add(node)
+        _invalidate_caches(env, node)
         env.offered.add(node)
         env.t += 1
-    env._influence_cache = {}
     return seeds
 
 
@@ -129,7 +146,7 @@ def _greedy_seed_selection(graph: nx.Graph, env: RevenueEnv, k: int) -> List:
         if best_node is not None:
             S.append(best_node)
             env.S.add(best_node)
-            env._influence_cache = {}
+            _invalidate_caches(env, best_node)
             remaining.discard(best_node)
 
     return S
@@ -287,11 +304,19 @@ def ie_strategy(graph: nx.Graph, cfg, return_stats: bool = False):
     for node in nodes:
         if node in env.offered:
             continue
-        valuation = env._compute_valuation(node)
+        # Seller prices at estimated valuation (discount=0 → myopic price)
+        est_val = env._estimate_valuation(node)
         n_offered += 1
-        if valuation > 0:
-            total_revenue += valuation
-            n_accepted += 1
+        if est_val > 0:
+            # Buyer accepts iff TRUE valuation >= offered price (est_val)
+            true_val = env._true_valuation(node)
+            if true_val >= est_val:
+                env.S.add(node)
+                env._influence_cache = {}
+                env._true_val_cache = {}
+                env._est_val_cache = {}
+                total_revenue += est_val
+                n_accepted += 1
         env.offered.add(node)
 
     if return_stats:
@@ -334,13 +359,16 @@ def mu_discount(graph: nx.Graph, cfg, return_stats: bool = False):
 
     for j, node in enumerate(sorted_nodes):
         discount = max(0.0, min(1.0, 1.0 - float(j) / mu)) if mu > 0 else 0.0
-        valuation = env._compute_valuation(node)
-        offered_price = valuation * (1.0 - discount)
+        # Seller estimates valuation to set price
+        est_val = env._estimate_valuation(node)
+        offered_price = est_val * (1.0 - discount)
         n_offered += 1
 
-        if valuation >= offered_price:
+        # Buyer accepts iff TRUE valuation >= offered price
+        true_val = env._true_valuation(node)
+        if true_val >= offered_price:
             env.S.add(node)
-            env._influence_cache = {}
+            _invalidate_caches(env, node)
             total_revenue += offered_price
             n_accepted += 1
 
@@ -398,7 +426,6 @@ def sigma_discount(graph: nx.Graph, cfg, return_stats: bool = False):
 
     for node in sorted_nodes:
         deg = degrees[node]
-        valuation = env._compute_valuation(node)
         n_offered += 1
 
         if deg > mu + sigma:
@@ -409,13 +436,19 @@ def sigma_discount(graph: nx.Graph, cfg, return_stats: bool = False):
             price = _rayleigh_price(2.0 / 6.0, b) # rest → f(2/6)≈0.534
 
         if price == 0.0:
+            # Free seed — always accepted
             env.S.add(node)
-            env._influence_cache = {}
-        elif valuation >= price:
-            env.S.add(node)
-            env._influence_cache = {}
-            total_revenue += price
-            n_accepted += 1
+            _invalidate_caches(env, node)
+        else:
+            # Buyer accepts iff TRUE valuation >= Rayleigh fixed price
+            true_val = env._true_valuation(node)
+            if true_val >= price:
+                env.S.add(node)
+                env._influence_cache = {}
+                env._true_val_cache = {}
+                env._est_val_cache = {}
+                total_revenue += price
+                n_accepted += 1
 
         env.offered.add(node)
         env.t += 1
@@ -469,8 +502,8 @@ def greedy_discount(graph: nx.Graph, cfg, return_stats: bool = False):
         if not remaining:
             break
 
-        # Greedy: highest current valuation first
-        target = max(remaining, key=lambda v: env._compute_valuation(v))
+        # Greedy: highest ESTIMATED valuation first (seller ranks by estimate)
+        target = max(remaining, key=lambda v: env._estimate_valuation(v))
         infl = _compute_normalized_infl(graph, target, env.S, lw)
 
         if infl < 2.0 / 6.0:
@@ -482,15 +515,17 @@ def greedy_discount(graph: nx.Graph, cfg, return_stats: bool = False):
             # Tier-2 price = lower boundary of tier: f(4/6) ≈ 0.548
             price = _rayleigh_price(4.0 / 6.0, b)
 
-        valuation = env._compute_valuation(target)
+        # Buyer accepts iff TRUE valuation >= offered price
+        true_val = env._true_valuation(target)
         n_offered += 1
 
         if price == 0.0:
+            # Free seed — always accepted
             env.S.add(target)
-            env._influence_cache = {}
-        elif valuation >= price:
+            _invalidate_caches(env, target)
+        elif true_val >= price:
             env.S.add(target)
-            env._influence_cache = {}
+            _invalidate_caches(env, target)
             total_revenue += price
             n_accepted += 1
 

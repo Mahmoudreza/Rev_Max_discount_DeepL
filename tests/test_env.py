@@ -75,12 +75,11 @@ def test_reset(small_graph):
 
 
 def test_step_accept(env_monotone):
-    """test_step_accept: buyers always accept since offered_price ≤ valuation.
+    """test_step_accept: at discount=1.0 the buyer always accepts a free item.
 
-    offered_price = valuation * (1-discount) ≤ valuation, so acceptance is
-    always True. At discount=1.0 the buyer accepts a FREE item (joins S, seeds
-    influence cascade). Revenue = 0 for that step; subsequent neighbors get
-    positive valuations and pay positive prices.
+    offered_price = est_val * (1-1.0) = 0 regardless of est_val.
+    true_val >= 0 is always True, so the buyer always accepts a free item.
+    Revenue = 0 for that step; node joins S and seeds the influence cascade.
     """
     env = env_monotone
     # Find first node with neighbors
@@ -99,12 +98,12 @@ def test_step_accept(env_monotone):
 
 
 def test_step_reject(env_monotone):
-    """test_step_reject: with S empty, valuation=0 → accepted as free seed, revenue=0.
+    """test_step_reject: with S empty, est_val=0 → offered_price=0 → free seed accepted.
 
-    When S is empty, all influence=0 → valuation=f(0)=0 for all nodes.
-    offered_price = 0*(1-discount) = 0.  accepted = (0 >= 0) = True.
-    The buyer is a free seed: joins S (bootstrapping cascade), revenue=0.
-    This is the correct Babaei et al. behavior: a free item is never refused.
+    When S is empty, estimated influence=0 → est_val=f(0)=0 → offered_price=0.
+    true_val=0 as well → accepted=(0>=0)=True.
+    The buyer becomes a free seed: joins S (bootstrapping cascade), revenue=0.
+    This is Babaei et al. correct: a buyer never refuses a free item.
     """
     env = env_monotone
     # S is empty → valuation=0 for any node, offered_price=0, accepted=True
@@ -133,7 +132,8 @@ def test_valuation_increases(env_monotone):
 
     # Manually add max_deg_node to S (bypass step to focus on valuation change)
     env.S.add(max_deg_node)
-    env._influence_cache = {}  # clear cache
+    env._influence_cache = {}     # clear legacy cache
+    env._true_val_cache = {}      # clear true valuation cache (S changed manually)
 
     val_after = env._compute_valuation(nb)
 
@@ -197,6 +197,7 @@ def test_monotone_model(small_graph):
     for nb in neighbors[:min(5, len(neighbors))]:
         env.S.add(nb)
         env._influence_cache = {}
+        env._true_val_cache = {}   # S changed manually — must clear true val cache
         new_val = env._compute_valuation(target)
         assert new_val >= prev_val - 1e-9, (
             f"Monotone model violated: val went from {prev_val:.4f} to {new_val:.4f}"
@@ -222,6 +223,7 @@ def test_non_monotone_model(small_graph):
     for nb in neighbors:
         env.S.add(nb)
     env._influence_cache = {}
+    env._true_val_cache = {}   # S changed manually
 
     val_full = env._compute_valuation(target)
 
@@ -229,8 +231,83 @@ def test_non_monotone_model(small_graph):
     # After full influence, valuation should be lower than peak
     # (i.e., at least one of the following holds: val_full < val_peak OR val_full >= val_zero)
     # The key property: Rayleigh PDF at y=2.0 (x=1.0) < peak at y=1.0 (x=0.5)
+
+
+def test_true_and_estimate_differ(small_graph):
+    """test_true_and_estimate_differ: estimated and true valuations must diverge.
+
+    Proves that _estimate_valuation uses FRESH independent weights while
+    _true_valuation uses the fixed true weights from reset().
+    After seeding at least one node, influence is non-zero and the two
+    estimates are drawn from different weight samples → they differ.
+    """
+    cfg = RevenueEnvConfig(n_mc_samples=50, seed=42)
+    env = RevenueEnv(small_graph, cfg)
+    env.reset()
+
+    # Seed the highest-degree node to make influence non-zero for its neighbours
+    hub = max(env.nodes, key=lambda v: small_graph.degree(v))
+    env.S.add(hub)
+    env._true_val_cache = {}
+    env._est_val_cache = {}
+
+    diffs = []
+    for node in env.nodes:
+        if node == hub:
+            continue
+        if small_graph.degree(node) == 0:
+            continue
+        true_v = env._true_valuation(node)
+        est_v  = env._estimate_valuation(node)
+        diffs.append(abs(true_v - est_v))
+
+    assert len(diffs) > 0, "No valid neighbour nodes found"
+    assert max(diffs) > 0.001, (
+        f"Estimated and true valuations are identical (max diff={max(diffs):.6f}) — "
+        "the two functions are not independent"
+    )
+
+
+def test_acceptance_not_guaranteed(small_graph):
+    """test_acceptance_not_guaranteed: at non-zero prices some buyers must reject.
+
+    With the corrected model (true_val vs est_val), µ-discount no longer
+    achieves 100% acceptance.  Offering at discount=0 (price = est_val)
+    should cause at least some rejections when true_val < est_val.
+    """
+    cfg = RevenueEnvConfig(n_mc_samples=50, seed=123)
+    env = RevenueEnv(small_graph, cfg)
+    env.reset()
+
+    # Give one free seed to start the cascade (discount=1.0 → always accepted)
+    hub_idx = env.node_to_idx[max(env.nodes, key=lambda v: small_graph.degree(v))]
+    env.step(hub_idx, discount=1.0)
+
+    rejections = 0
+    for i in range(env.n):
+        node = env.nodes[i]
+        if node in env.offered:
+            continue
+        if len(env.offered) >= 15:  # test first 15 non-hub offers
+            break
+        _, _, _, info = env.step(i, discount=0.0)  # discount=0 → price = est_val
+        if not info["accepted"]:
+            rejections += 1
+
+    assert rejections > 0, (
+        "All buyers accepted at discount=0 — true/estimated separation not working. "
+        f"offered={len(env.offered)} steps"
+    )
+
+
+def test_non_monotone_math(small_graph):
+    """test_non_monotone_math: Rayleigh PDF is higher at x=0.5 than at x=1.0."""
+    cfg = RevenueEnvConfig(influence_model="non_monotone", seed=42)
+    env = RevenueEnv(small_graph, cfg)
+    env.reset()
+
     peak_val = env._apply_influence_model(0.5)  # peak is at x=0.5
-    full_val = env._apply_influence_model(1.0)
+    full_val  = env._apply_influence_model(1.0)
     assert full_val < peak_val, (
         f"Non-monotone: value at x=1.0 ({full_val:.4f}) should be < "
         f"peak at x=0.5 ({peak_val:.4f})"
