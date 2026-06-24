@@ -69,10 +69,12 @@ def generate_forest_fire(
             G.add_edge(v, w)
 
             # Burn forward links (out-neighbors of w)
+            # Leskovec 2007: x ~ Geometric with mean p/(1-p)
+            # numpy geometric(q)-1 has mean (1-q)/q = p/(1-p) when q = 1-p
             out_neighbors = list(G.successors(w))
-            n_forward = np.random.default_rng(
+            n_forward = int(np.random.default_rng(
                 rng.randint(0, 2**31)
-            ).geometric(p) - 1
+            ).geometric(1.0 - p)) - 1
             n_forward = min(n_forward, len(out_neighbors))
             if n_forward > 0:
                 chosen = rng.sample(out_neighbors, n_forward)
@@ -80,9 +82,9 @@ def generate_forest_fire(
 
             # Burn backward links (in-neighbors of w)
             in_neighbors = list(G.predecessors(w))
-            n_backward = np.random.default_rng(
+            n_backward = int(np.random.default_rng(
                 rng.randint(0, 2**31)
-            ).geometric(pb) - 1
+            ).geometric(1.0 - pb)) - 1
             n_backward = min(n_backward, len(in_neighbors))
             if n_backward > 0:
                 chosen = rng.sample(in_neighbors, n_backward)
