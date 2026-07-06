@@ -13,7 +13,8 @@ from typing import List
 import numpy as np
 
 from src.utils.helpers import graph_to_pyg_data, get_available_mask
-from src.utils.features import compute_static_features, compute_node_features
+from src.utils.features import (compute_static_features, compute_node_features,
+                                  build_graph_feature_cache, compute_node_features_fast)
 from src.evaluation.baselines import _make_env
 
 
@@ -38,7 +39,17 @@ class REINFORCETrainer:
             lr=cfg.training.reinforce_lr,
             weight_decay=cfg.training.weight_decay,
         )
-        self._baseline = 0.0   # running mean baseline
+        self._baseline = 0.0          # legacy (kept for backward compat)
+        self.reward_baseline = 0.0    # episode-level reward baseline (size-normalised)
+        self._static_cache: dict = {} # graph id → static features (avoid O(nm) repeat)
+        self._feat_cache: dict = {}   # graph id → build_graph_feature_cache result
+
+        # ── Running reward statistics (Welford's online algorithm) ────────────
+        # Used to normalise the advantage so that zero-reward episodes produce
+        # a negative signal ("you did worse than average") rather than no signal.
+        self._rw_mean:  float = 0.0
+        self._rw_m2:    float = 1.0   # variance accumulator (init 1 → std=1 early)
+        self._rw_count: int   = 0
 
     def collect_rollout(self, graph) -> dict:
         """Run one episode and collect (state, action, reward) trajectory.
@@ -51,7 +62,15 @@ class REINFORCETrainer:
         """
         env = _make_env(graph, self.cfg)
         obs = env.reset()
-        static = compute_static_features(graph)
+        # Reset LSTM/Transformer hidden state at episode start
+        if hasattr(self.policy, "reset_episode"):
+            self.policy.reset_episode(self.device)
+        gid = id(graph)
+        if gid not in self._static_cache:
+            self._static_cache[gid] = compute_static_features(graph)
+        if gid not in self._feat_cache:
+            self._feat_cache[gid] = build_graph_feature_cache(graph, self._static_cache[gid])
+        fcache = self._feat_cache[gid]
         n = graph.number_of_nodes()
         nodes = list(graph.nodes())
 
@@ -62,15 +81,9 @@ class REINFORCETrainer:
             if not available:
                 break
 
-            features = compute_node_features(
-                graph=graph,
-                static_features=static,
-                S=frozenset(env.S),
-                offered=frozenset(env.offered),
-                t=env.t,
-                n=n,
-                k=n,
-                env=env,
+            features = compute_node_features_fast(
+                cache=fcache, S=frozenset(env.S), offered=frozenset(env.offered),
+                t=env.t, k=n, env=env,
             )
             data = graph_to_pyg_data(graph, features, self.device)
             available_mask = get_available_mask(n, frozenset(env.offered), nodes, self.device)
@@ -89,6 +102,11 @@ class REINFORCETrainer:
                 node_idx = available[0]  # fallback
 
             _, reward, done, info = env.step(node_idx, discount)
+            # Notify LSTM/Transformer sequence model of step outcome
+            if hasattr(self.policy, "update_sequence_state"):
+                self.policy.update_sequence_state(
+                    discount, bool(reward > 0), float(reward)
+                )
             actions.append((node_idx, discount))
             rewards.append(reward)
 
@@ -101,6 +119,23 @@ class REINFORCETrainer:
             "rewards": rewards,
             "total_revenue": env.total_revenue,
         }
+
+    def _normalize_reward(self, reward: float) -> float:
+        """Online Welford normalisation of per-episode reward.
+
+        Keeps a running mean and variance of (total_revenue / n) values seen
+        during training.  Returns z-scored value so that:
+          - Episodes below the running mean → negative advantage → policy pushed away
+          - Episodes above the running mean → positive advantage → policy reinforced
+          - Scale is independent of graph size or reward magnitude
+        """
+        self._rw_count += 1
+        delta = reward - self._rw_mean
+        self._rw_mean += delta / self._rw_count
+        delta2 = reward - self._rw_mean
+        self._rw_m2 += delta * delta2
+        std = max((self._rw_m2 / max(self._rw_count, 1)) ** 0.5, 1e-8)
+        return (reward - self._rw_mean) / std
 
     def compute_returns(self, rewards: List[float]) -> List[float]:
         """Compute discounted returns G_t = sum_{k>=t} gamma^(k-t) * r_k.
@@ -130,39 +165,35 @@ class REINFORCETrainer:
         Returns:
             Policy loss value.
         """
-        returns = self.compute_returns(rollout["rewards"])
-        G_mean = float(np.mean(returns))
-
-        # Update running baseline
-        self._baseline = 0.95 * self._baseline + 0.05 * G_mean
-        baseline = self._baseline
-
-        total_loss = torch.tensor(0.0, device=self.device, requires_grad=False)
-        policy_losses = []
-
-        static = compute_static_features(graph)
+        gid = id(graph)
+        if gid not in self._static_cache:
+            self._static_cache[gid] = compute_static_features(graph)
+        if gid not in self._feat_cache:
+            self._feat_cache[gid] = build_graph_feature_cache(graph, self._static_cache[gid])
+        fcache = self._feat_cache[gid]
         n = graph.number_of_nodes()
         nodes = list(graph.nodes())
 
+        # Episode-level advantage: normalised by running reward statistics.
+        # This ensures zero-revenue episodes produce a NEGATIVE signal, which
+        # is essential for breaking out of the "give everything for free" trap.
+        total_rev = rollout["total_revenue"] / n
+        advantage = self._normalize_reward(total_rev)
+
+        policy_losses = []
         env = _make_env(graph, self.cfg)
         env.reset()
 
-        for t, (step_data, (node_idx, discount), G_t) in enumerate(
-            zip(rollout["states"], rollout["actions"], returns)
+        for t, (step_data, (node_idx, discount)) in enumerate(
+            zip(rollout["states"], rollout["actions"])
         ):
             features, edges, offered_list = step_data
             offered = frozenset(offered_list)
             available_mask = get_available_mask(n, offered, nodes, self.device)
 
-            features_tensor = compute_node_features(
-                graph=graph,
-                static_features=static,
-                S=frozenset(env.S),
-                offered=offered,
-                t=t,
-                n=n,
-                k=n,
-                env=env,
+            features_tensor = compute_node_features_fast(
+                cache=fcache, S=frozenset(env.S), offered=offered,
+                t=t, k=n, env=env,
             )
             data = graph_to_pyg_data(graph, features_tensor, self.device)
 
@@ -170,9 +201,13 @@ class REINFORCETrainer:
                 data.x, data.edge_index, available_mask, greedy=False
             )
 
-            advantage = G_t - baseline
-            policy_loss = -log_prob * advantage
-            policy_losses.append(policy_loss)
+            # Entropy regularisation: bonus for non-degenerate Beta distributions.
+            # High entropy (α ≈ β ≈ 1) means wide discount range is explored.
+            # Low entropy (α or β >> 1) means distribution is concentrated.
+            entropy = getattr(self.policy, '_last_entropy',
+                              torch.tensor(0.0, device=self.device))
+            entropy_coef = float(getattr(self.cfg.training, 'entropy_coef', 0.01))
+            policy_losses.append(-log_prob * advantage - entropy_coef * entropy)
 
             # Update env state
             if node_idx in env.available_nodes:
@@ -186,6 +221,8 @@ class REINFORCETrainer:
                 self.policy.parameters(), self.cfg.training.grad_clip
             )
             self.optimizer.step()
+            # Update legacy EMA baseline (kept for logging / backward compat)
+            self.reward_baseline = 0.99 * self.reward_baseline + 0.01 * total_rev
             return float(loss.item())
 
         return 0.0

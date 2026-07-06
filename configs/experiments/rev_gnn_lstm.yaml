@@ -1,14 +1,36 @@
 # configs/experiments/rev_gnn_lstm.yaml
+# Rev-GNN-LSTM: GraphSAGE + EpisodeLSTM + CE Imitation Phase 1 + Pricing P1.5 + Joint P2
+# LSTM adds episode-level memory: observes rejection patterns across steps.
+
 project:
   experiment_name: "rev_gnn_lstm"
+
 encoder:
   type: "graphsage"
   hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
 sequence_model:
   type: "lstm"
   lstm_hidden: 64
   lstm_n_layers: 1
+
 training:
   algorithm: "imitation+reinforce"
-  imitation_epochs: 100
+  imitation_epochs: 150          # LSTM helps convergence → fewer epochs than Rev-GNN-IM-RL
+  imitation_lr: 1.0e-3
+  pricing_loss_weight: 0.3       # L = L_CE + 0.3 * MSE(pred_discount, expert_discount)
+  entropy_coef: 0.01             # Beta-distribution entropy regularisation weight
   reinforce_epochs: 100
+  reinforce_epochs_phase15: 50
+  reinforce_epochs_phase2: 200
+  reinforce_lr: 1.0e-5
+  weight_decay: 0.0
+  grad_clip: 1.0
+  n_train_graphs: 5
+
+evaluation:
+  n_test_graphs: 1
+  n_trials: 3
+  test_n_nodes: 1000

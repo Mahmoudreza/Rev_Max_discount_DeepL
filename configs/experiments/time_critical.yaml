@@ -1,0 +1,39 @@
+# configs/experiments/time_critical.yaml
+# Idea 2 — Time-Critical Revenue Maximization
+#
+# The SAME sequential model as Idea 1 (Babaei et al.). No IC cascade.
+# Deadline τ = number of ACCEPTANCES before which revenue is counted.
+# Revenue at τ = revenue_at_k(cum_rev_by_S, τ) — identical to Idea 1's budget curve.
+
+defaults:
+  - base_config
+
+project:
+  experiment_name: "time_critical"
+
+# ── TC-specific section ────────────────────────────────────────────────────────
+time_critical:
+  enabled: true
+
+  # Evaluation checkpoints τ (number of acceptances)
+  # These are the deadline values reported in Table TC and Fig TC-2.
+  checkpoints: [50, 100, 200, 300, 500, 1000]
+
+  # Training reward weights for Phase 2 TC-REINFORCE (run_tc_training.py)
+  # Reward = w1×Rev(τ1) + w2×Rev(τ2) + w3×Rev(τ3)
+  # 50% weight on first 100 acceptances → agent front-loads revenue
+  training_checkpoints: [100, 300, 1000]
+  training_weights: [0.5, 0.3, 0.2]
+
+# ── Training overrides for TC fine-tuning ────────────────────────────────────
+training:
+  imitation_epochs: 300
+  imitation_lr: 1.0e-3
+  pricing_loss_weight: 0.3
+  reinforce_lr: 5.0e-5
+  # Phase 2 epochs — 50 for quick demo; 200 for full paper run
+  reinforce_epochs_phase2: 50
+  entropy_coef: 0.01
+  grad_clip: 1.0
+  weight_decay: 0.0
+  n_train_graphs: 3

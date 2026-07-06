@@ -1,14 +1,36 @@
 # configs/experiments/rev_gail_lstm.yaml
+# Rev-GAIL-LSTM: GraphSAGE + EpisodeLSTM + GAIL Phase 1 + Pricing P1.5 + Joint P2
+# Best-of-both: GAIL learns distribution of good trajectories + LSTM adapts to rejections.
+
 project:
   experiment_name: "rev_gail_lstm"
+
 encoder:
   type: "graphsage"
   hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
 sequence_model:
   type: "lstm"
   lstm_hidden: 64
   lstm_n_layers: 1
+
 training:
   algorithm: "gail+reinforce"
-  gail_epochs: 50
+  gail_epochs: 100
+  gail_lr_gen: 1.0e-4
+  gail_lr_disc: 1.0e-4
   reinforce_epochs: 100
+  reinforce_epochs_phase15: 50
+  reinforce_epochs_phase2: 200
+  reinforce_lr: 1.0e-5
+  pricing_loss_weight: 0.0
+  weight_decay: 0.0
+  grad_clip: 1.0
+  n_train_graphs: 5
+
+evaluation:
+  n_test_graphs: 1
+  n_trials: 3
+  test_n_nodes: 1000

@@ -1,11 +1,31 @@
 # configs/experiments/rev_gail_rl_rich.yaml
+# Rev-GAIL-RL-Rich: GraphSAGE + GAIL Phase 1 + Pricing REINFORCE Phase 1.5 + Joint REINFORCE Phase 2
+# Same encoder / policy as Rev-GNN-IM-RL; only Phase 1 differs (GAIL vs CE imitation).
+
 project:
   experiment_name: "rev_gail_rl_rich"
+
 encoder:
   type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
 training:
   algorithm: "gail+reinforce"
-  gail_epochs: 50
-  reinforce_epochs: 100
-  gail_lr_gen: 1.0e-4
-  gail_lr_disc: 1.0e-4
+  gail_epochs: 100               # Phase 1: GAIL adversarial warm-start
+  gail_lr_gen: 1.0e-4            # Generator (policy) LR
+  gail_lr_disc: 1.0e-4           # Discriminator LR
+  reinforce_epochs: 100          # kept for REINFORCETrainer.train() compat
+  reinforce_epochs_phase15: 50   # Phase 1.5: pricing REINFORCE (frozen encoder+scoring)
+  reinforce_epochs_phase2: 200   # Phase 2: joint REINFORCE (all params)
+  reinforce_lr: 1.0e-5
+  pricing_loss_weight: 0.0       # No MSE supervision in GAIL mode (D provides signal)
+  weight_decay: 0.0
+  grad_clip: 1.0
+  n_train_graphs: 5
+
+evaluation:
+  n_test_graphs: 1
+  n_trials: 3
+  test_n_nodes: 1000

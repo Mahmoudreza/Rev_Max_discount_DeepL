@@ -69,13 +69,16 @@ class SequentialJointPolicy(nn.Module):
             nn.Linear(scoring_hidden, 1),
         )
 
-        # Pricing head: [H_{v*} ‖ c_t] → discount ∈ [0,1]
+        # Pricing head: [H_{v*} ‖ c_t] → Beta(α, β) distribution over discount
+        # Outputs 2 raw values → softplus + 1 → α > 1, β > 1 (unimodal Beta)
         self.pricing_head = nn.Sequential(
             nn.Linear(combined_dim, pricing_hidden),
             nn.ReLU(),
-            nn.Linear(pricing_hidden, 1),
-            nn.Sigmoid(),
+            nn.Linear(pricing_hidden, 2),   # 2 outputs: raw_alpha, raw_beta
         )
+
+        # Last entropy for trainer entropy regularisation
+        self._last_entropy: torch.Tensor = torch.tensor(0.0)
 
         # Detect which sequence model we have
         self._is_lstm = isinstance(sequence_model, EpisodeLSTM)
@@ -84,6 +87,23 @@ class SequentialJointPolicy(nn.Module):
         # Episode state (reset each episode)
         self._lstm_hidden = None
         self._token_history: List[torch.Tensor] = []
+
+    def get_discount_distribution(self, combined: torch.Tensor) -> torch.distributions.Beta:
+        """Get Beta distribution for the discount given a combined [h ‖ c] vector.
+
+        Args:
+            combined: Concatenated node+context embedding, shape (combined_dim,)
+                      or (1, combined_dim).
+
+        Returns:
+            Beta distribution with α > 1 and β > 1 (guaranteed unimodal).
+        """
+        if combined.dim() == 1:
+            combined = combined.unsqueeze(0)
+        raw = self.pricing_head(combined).squeeze(0)   # (2,)
+        alpha = F.softplus(raw[0]) + 1.0
+        beta  = F.softplus(raw[1]) + 1.0
+        return torch.distributions.Beta(alpha, beta)
 
     def reset_episode(self, device: torch.device) -> None:
         """Reset internal sequence model state at the start of each episode.
@@ -144,13 +164,18 @@ class SequentialJointPolicy(nn.Module):
 
         # ── Sequence model: compute context c_t ──────────────────────────────
         if self._is_lstm and self._lstm_hidden is not None:
-            context, self._lstm_hidden = self.sequence_model.step(
+            context, _new_h = self.sequence_model.step(
                 graph_emb,
                 self._last_discount,
                 self._last_accepted,
                 self._last_revenue,
                 self._lstm_hidden,
             )
+            # Detach hidden state to prevent unbounded BPTT chain across steps.
+            # MPS (Apple Metal) fails on long RNN backward chains (~100+ steps).
+            # Gradient still flows through the current step's output (context),
+            # which is sufficient to train all LSTM parameters ("online LSTM").
+            self._lstm_hidden = (_new_h[0].detach(), _new_h[1].detach())
             # Store token for transformer fallback / logging
             token = self.sequence_model.token_proj(
                 torch.cat([
@@ -225,9 +250,20 @@ class SequentialJointPolicy(nn.Module):
             node_idx = int(dist.sample().item())
             log_prob_node = dist.log_prob(torch.tensor(node_idx, device=probs.device))
 
-        # ── Discount pricing: [H_{v*} ‖ c_t] ─────────────────────────────────
+        # ── Discount pricing via Beta distribution: [H_{v*} ‖ c_t] ──────────
         combined_selected = torch.cat([h[node_idx], context], dim=0)  # (128,)
-        discount_tensor = self.pricing_head(combined_selected.unsqueeze(0)).squeeze()
-        discount = float(discount_tensor.item())
+        dist = self.get_discount_distribution(combined_selected)
 
-        return node_idx, discount, log_prob_node
+        # Store entropy for trainer entropy regularisation
+        self._last_entropy = dist.entropy()
+
+        if greedy:
+            discount_t = dist.mean         # E[Beta] = α/(α+β)
+            log_prob = log_prob_node
+        else:
+            discount_t = dist.rsample().clamp(1e-6, 1.0 - 1e-6)
+            log_prob_discount = dist.log_prob(discount_t)
+            log_prob = log_prob_node + log_prob_discount
+
+        discount = float(discount_t.item())
+        return node_idx, discount, log_prob

@@ -104,14 +104,14 @@ def test_trajectory_length(small_graph, cfg):
 
 def test_trajectory_discount_in_range(small_graph, cfg):
     """All trajectory discounts ∈ [0, 1]."""
-    for _, discount, _ in greedy_discount_trajectory(small_graph, cfg):
-        assert 0.0 <= discount <= 1.0
+    for t in greedy_discount_trajectory(small_graph, cfg):
+        assert 0.0 <= t["discount"] <= 1.0, f"discount {t['discount']} out of range"
 
 
 def test_trajectory_node_indices_unique(small_graph, cfg):
     """Every node appears exactly once in trajectory."""
     traj = greedy_discount_trajectory(small_graph, cfg)
-    indices = [t[0] for t in traj]
+    indices = [t["node_idx"] for t in traj]
     assert len(indices) == len(set(indices))
 
 

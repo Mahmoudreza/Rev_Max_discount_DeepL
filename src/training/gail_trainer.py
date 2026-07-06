@@ -103,6 +103,9 @@ class GAILTrainer:
         """Collect one agent episode trajectory."""
         env = _make_env(graph, self.cfg)
         env.reset()
+        # Reset LSTM/Transformer state at episode start
+        if hasattr(self.policy, "reset_episode"):
+            self.policy.reset_episode(self.device)
         static = compute_static_features(graph)
         n = graph.number_of_nodes()
         nodes = list(graph.nodes())
@@ -138,15 +141,27 @@ class GAILTrainer:
             })
 
             if node_idx in available:
-                env.step(node_idx, discount)
+                _, reward, done, _ = env.step(node_idx, discount)
             else:
-                env.step(available[0], discount)
+                _, reward, done, _ = env.step(available[0], discount)
+            if hasattr(self.policy, "update_sequence_state"):
+                self.policy.update_sequence_state(
+                    discount, bool(reward > 0), float(reward)
+                )
 
         return trajectory
 
-    def _get_expert_demos(self, graph) -> List[Tuple]:
-        """Get expert (state, action) pairs."""
-        expert_traj = greedy_discount_trajectory(graph, self.cfg)
+    def _get_expert_demos(self, graph, cached_traj=None) -> List[Tuple]:
+        """Get expert (state, action) pairs.
+
+        Args:
+            graph: NetworkX graph.
+            cached_traj: Pre-computed trajectory from greedy_discount_trajectory().
+                         Pass this to avoid recomputing the expensive MC simulation
+                         every epoch. Only the encoder embeddings are recomputed.
+        """
+        expert_traj = cached_traj if cached_traj is not None \
+            else greedy_discount_trajectory(graph, self.cfg)
         env = _make_env(graph, self.cfg)
         env.reset()
         static = compute_static_features(graph)
@@ -154,7 +169,11 @@ class GAILTrainer:
         nodes = list(graph.nodes())
         demos = []
 
-        for node_idx, discount, _ in expert_traj:
+        for traj_item in expert_traj:
+            node_idx = traj_item["node_idx"]
+            discount  = traj_item["discount"]
+            accepted  = traj_item.get("accepted", True)
+
             features = compute_node_features(
                 graph=graph, static_features=static,
                 S=frozenset(env.S), offered=frozenset(env.offered),
@@ -167,12 +186,13 @@ class GAILTrainer:
             global_s, node_e, d = self._encode_action(h.detach(), node_idx, discount)
             demos.append((global_s, node_e, d))
 
-            # Advance env state
+            # Advance env state (only add to S if expert accepted)
             node = nodes[node_idx] if node_idx < n else nodes[0]
             if node not in env.offered:
-                env.S.add(node)
+                if accepted:
+                    env.S.add(node)
+                    env._influence_cache = {}
                 env.offered.add(node)
-                env._influence_cache = {}
             env.t += 1
 
         return demos
@@ -190,11 +210,23 @@ class GAILTrainer:
         log_every = self.cfg.logging.log_every_n_steps
         disc_losses, gen_losses = [], []
 
+        # Pre-compute expert trajectories ONCE — greedy_discount_trajectory is
+        # O(n × MC_trials) and never changes between epochs. Without caching,
+        # 100 epochs × 5 graphs = 500 recomputations = 30–50 hours runtime.
+        self.logger.info(
+            f"  GAIL: pre-computing expert trajectories for {len(train_graphs)} graphs..."
+        )
+        traj_cache = {
+            id(g): greedy_discount_trajectory(g, self.cfg) for g in train_graphs
+        }
+        self.logger.info("  Expert trajectory cache ready. Starting adversarial training.")
+
         for epoch in range(n_epochs):
             for graph in train_graphs:
                 # 1. Discriminator update
                 agent_traj = self._collect_agent_rollout(graph)
-                expert_demos = self._get_expert_demos(graph)
+                # Use cached trajectory — only encoder embeddings are recomputed
+                expert_demos = self._get_expert_demos(graph, cached_traj=traj_cache[id(graph)])
 
                 disc_loss = torch.tensor(0.0, device=self.device, requires_grad=True)
                 d_losses = []
@@ -255,6 +287,9 @@ class GAILTrainer:
             if epoch % log_every == 0:
                 d_l = disc_losses[-1] if disc_losses else 0.0
                 g_l = gen_losses[-1] if gen_losses else 0.0
+                self.logger.info(
+                    f"  GAIL ep={epoch:3d}/{n_epochs}  disc={d_l:.4f}  gen={g_l:.4f}"
+                )
                 self.logger.log({
                     "gail/epoch": epoch,
                     "gail/disc_loss": d_l,

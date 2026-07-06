@@ -1,0 +1,19 @@
+# .dockerignore — exclude large/local-only files from Docker build context
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.DS_Store
+
+# Checkpoints — distribute via GitHub Release, not image
+results/checkpoints/*.pt
+
+# Logs and run artifacts
+results/logs/
+/tmp/
+
+# Notebooks and editor config
+*.ipynb
+.vscode/
+.env

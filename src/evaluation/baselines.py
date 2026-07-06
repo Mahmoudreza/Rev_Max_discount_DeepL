@@ -544,19 +544,23 @@ def greedy_discount(graph: nx.Graph, cfg, return_stats: bool = False):
     return total_revenue
 
 
-def greedy_discount_trajectory(graph: nx.Graph, cfg) -> List[Tuple]:
+def greedy_discount_trajectory(graph: nx.Graph, cfg) -> List[Dict]:
     """Expert trajectory from greedy_discount for imitation learning (GAIL).
 
-    Mirrors greedy_discount() exactly but runs n steps (full episode) for
-    GAIL training.  At each step: select highest-valuation remaining buyer,
+    Mirrors greedy_discount() exactly but runs n steps (full episode).
+    At each step: select highest ESTIMATED valuation remaining buyer,
     price based on current influence tier:
 
-      influence < 2/6  → discount = 1.0, revenue = 0 (FREE)
-      2/6 ≤ infl < 4/6 → price = f(1/6); discount = 1 − price/valuation
-      influence ≥ 4/6  → price = f(2/6); discount = 1 − price/valuation
+      influence < 2/6  → FREE (discount=1.0, no revenue)
+      2/6 ≤ infl < 4/6 → Rayleigh price f(2/6) ≈ 0.534
+      influence ≥ 4/6  → Rayleigh price f(4/6) ≈ 0.548
+
+    Acceptance rule (FIX):  buyer uses _true_valuation (not _estimate_valuation)
+    consistent with how env.step() and greedy_discount() work.
 
     Returns:
-        List of (node_idx, discount, marginal_revenue) per step (length n).
+        List of dicts per step (length n), each with keys:
+            node_idx, discount, marginal_gain, price, accepted.
     """
     env = _make_env(graph, cfg)
     env.reset()
@@ -565,14 +569,15 @@ def greedy_discount_trajectory(graph: nx.Graph, cfg) -> List[Tuple]:
     b = float(cfg.influence.b)
     lw = env._link_weights
     offered_set: set = set()
-    trajectory: List[Tuple] = []
+    trajectory: List[Dict] = []
 
     for _ in range(n):
         remaining = [v for v in env.nodes if v not in offered_set]
         if not remaining:
             break
 
-        target = max(remaining, key=lambda v: env._compute_valuation(v))
+        # Seller selects by highest ESTIMATED valuation (matches greedy_discount())
+        target = max(remaining, key=lambda v: env._estimate_valuation(v))
         infl = _compute_normalized_infl(graph, target, env.S, lw)
 
         if infl < 2.0 / 6.0:
@@ -582,24 +587,37 @@ def greedy_discount_trajectory(graph: nx.Graph, cfg) -> List[Tuple]:
         else:
             price = _rayleigh_price(4.0 / 6.0, b)
 
-        valuation = env._compute_valuation(target)
+        est_val = env._estimate_valuation(target)  # seller's estimate → sets discount
+        true_val = env._true_valuation(target)     # buyer's threshold → acceptance
         node_idx = env.node_to_idx[target]
 
         if price == 0.0:
+            # Free seed — direct S add, no revenue
             env.S.add(target)
             env._influence_cache = {}
             discount_val = 1.0
             marginal = 0.0
-        elif valuation >= price:
+            accepted = True
+        elif true_val >= price:
+            # Buyer accepts (true_val ≥ price) — FIX: use true_val not est_val
             env.S.add(target)
             env._influence_cache = {}
-            discount_val = max(0.0, 1.0 - price / valuation) if valuation > 0 else 0.0
+            discount_val = max(0.0, 1.0 - price / est_val) if est_val > 0 else 0.0
             marginal = price
+            accepted = True
         else:
-            discount_val = max(0.0, 1.0 - price / valuation) if valuation > 0 else 0.0
+            # Buyer rejects
+            discount_val = max(0.0, 1.0 - price / est_val) if est_val > 0 else 0.0
             marginal = 0.0
+            accepted = False
 
-        trajectory.append((node_idx, discount_val, marginal))
+        trajectory.append({
+            "node_idx": node_idx,
+            "discount": discount_val,
+            "marginal_gain": marginal,
+            "price": price,
+            "accepted": accepted,
+        })
         offered_set.add(target)
         env.offered.add(target)
         env.t += 1

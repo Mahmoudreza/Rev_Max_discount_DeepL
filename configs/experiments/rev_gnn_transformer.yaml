@@ -1,0 +1,48 @@
+# configs/experiments/rev_gnn_transformer.yaml
+# Rev-GNN-Transformer: GraphSAGE + EpisodeTransformerSliding (ALiBi, window=256)
+# Hypothesis: Transformer >= LSTM on large n (2000) and OOD topologies.
+
+project:
+  experiment_name: "rev_gnn_transformer"
+  seed: 42
+
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
+transformer:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  ffn_dim: 128
+  attention_window: 256   # sliding window cap; logged at training start
+  dropout: 0.0
+
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 50            # same as LSTM (per-step backward); 300 not needed
+  imitation_lr: 1.0e-3
+  pricing_loss_weight: 0.3
+  entropy_coef: 0.01
+  reinforce_epochs_phase2: 200
+  reinforce_lr: 1.0e-5
+  weight_decay: 0.0
+  grad_clip: 1.0
+  n_train_graphs: 5
+
+features:
+  dim: 20                         # 20-dim node features (same as LSTM)
+
+graph:
+  p: 0.37
+  pb: 0.32
+
+influence:
+  b: 1.0
+
+evaluation:
+  n_test_graphs: 1
+  n_trials: 5                     # 5 seeds for generalization table (Fig 4 protocol)
+  test_n_nodes: 1000

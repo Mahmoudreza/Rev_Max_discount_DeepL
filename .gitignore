@@ -1,20 +1,64 @@
+# .gitignore — revmax-aaai2027
+
+# ── Python ─────────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Virtual environment ────────────────────────────────────────────────────────
 venv/
+.venv/
+env/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
 .env
+.envrc
+
+# ── Data (large, reproducible) ─────────────────────────────────────────────────
 data/raw/*
 data/processed/*
 data/graphs/*
-!data/raw/.gitkeep
+# Keep the Rice-FB raw files (small, needed for preprocessing)
 !data/raw/rice-facebook-undergrads-links.txt
 !data/raw/rice-facebook-undergrads-users.txt
+# Keep gitkeep markers
+!data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/graphs/.gitkeep
-results/checkpoints/*
-!results/checkpoints/.gitkeep
+
+# ── Checkpoints (.pt files — distributed via GitHub Release) ──────────────────
+*.pt
+!results/checkpoints/README.md
+results/checkpoints/.gitkeep
+
+# ── Logs (large, reproducible) ─────────────────────────────────────────────────
 results/logs/*
 !results/logs/.gitkeep
+
+# ── Figures: KEEP in git (small, useful for quick review) ─────────────────────
+# results/figures/ is intentionally NOT ignored
+
+# ── Editor / OS ────────────────────────────────────────────────────────────────
+.DS_Store
+.vscode/settings.json
+.vscode/launch.json
+*.swp
+*.swo
+*~
+.idea/
+
+# ── Notebooks ──────────────────────────────────────────────────────────────────
+*.ipynb
+.ipynb_checkpoints/
+
+# ── Weights & Biases (not used, but guard against accidental init) ─────────────
 wandb/
+
+# ── Paper LaTeX aux files ──────────────────────────────────────────────────────
 paper/*.aux
 paper/*.log
 paper/*.out
@@ -22,6 +66,12 @@ paper/*.bbl
 paper/*.blg
 paper/*.synctex.gz
 paper/main.pdf
-.DS_Store
-.vscode/settings.json
-*.swp
+
+# ── Temporary training artifacts ──────────────────────────────────────────────
+# /tmp/ is system-managed, not in repo; listed here for documentation
+# nohup.out files created in root (if any)
+nohup.out
+
+# ── Dev-only scratch scripts (root-level, prefixed _ or debug_) ───────────────
+/_*.py
+/debug_*.py

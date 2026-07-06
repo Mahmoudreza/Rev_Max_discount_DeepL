@@ -1,5 +1,6 @@
 # configs/experiments/rev_gnn_im_rl.yaml
 # Rev-GNN-IM-RL: GraphSAGE + Imitation (Phase 1) + REINFORCE (Phase 2)
+# Inherits all defaults from configs/base_config.yaml via load_config_with_base().
 
 project:
   experiment_name: "rev_gnn_im_rl"
@@ -12,9 +13,19 @@ encoder:
 
 training:
   algorithm: "imitation+reinforce"
-  imitation_epochs: 100
+  imitation_epochs: 300              # enough for CE + pricing MSE to converge
   reinforce_epochs: 100
-  lr: 1.0e-3
-  reinforce_lr: 1.0e-4
-  n_rollouts: 10
+  reinforce_epochs_phase15: 50
+  reinforce_epochs_phase2: 200
+  imitation_lr: 1.0e-3
+  reinforce_lr: 1.0e-5
+  pricing_loss_weight: 0.3           # L = L_CE + 0.3 * MSE(pred_discount, expert_discount)
+  entropy_coef: 0.01                 # Beta-distribution entropy regularisation weight
+  weight_decay: 0.0
   grad_clip: 1.0
+  n_train_graphs: 5
+
+evaluation:
+  n_test_graphs: 1      # 1 held-out n=1000 Forest Fire graph
+  n_trials: 3           # MC trials for final baseline comparison
+  test_n_nodes: 1000    # size of held-out test graph
