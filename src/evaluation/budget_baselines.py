@@ -599,16 +599,19 @@ def evaluate_policy_under_budget(
         Aggregated dict including bankrupt_step if bankruptcy occurred.
     """
     import torch
-    from src.utils.features import compute_static_features, compute_node_features
+    from src.utils.features import (
+        compute_static_features, build_graph_feature_cache, compute_node_features_fast,
+    )
 
     n = graph.number_of_nodes()
     results = []
 
-    # Pre-compute static features (same for all trials)
+    # Pre-compute static features + graph cache once (avoids O(n²) per step)
     try:
         static_feats = compute_static_features(graph)
+        feat_cache = build_graph_feature_cache(graph, static_feats)
     except Exception:
-        static_feats = None
+        feat_cache = None
 
     for trial in range(n_trials):
         env = _make_env(graph, B, c, seed=trial, weight_high=weight_high)
@@ -631,14 +634,15 @@ def evaluate_policy_under_budget(
         bankrupt_step: Optional[int] = None
 
         while len(env.offered) < env.n:
-            # Standard 20-dim features (no budget dim — policy is budget-unaware).
-            # Use k=n so that round_ratio = t/n ramps 0→1 over the episode,
-            # matching training-time distribution (avoids saturating at 1.0 from step 1).
+            # Fast 20-dim features (uses precomputed graph cache → O(n) per step).
+            # Use k=n so that round_ratio = t/n ramps 0→1 over the episode.
             try:
-                feats = compute_node_features(
-                    graph, static_feats, env.S, env.offered, env.t, n,
-                    k=n, env=env,
-                )
+                if feat_cache is not None:
+                    feats = compute_node_features_fast(
+                        feat_cache, env.S, env.offered, env.t, k=n, env=env,
+                    )
+                else:
+                    raise RuntimeError("no cache")
             except Exception:
                 feats = np.zeros((n, 20), dtype=np.float32)
 
@@ -706,16 +710,20 @@ def evaluate_budget_aware_policy(
     NOTE: Uses GREEDY execution (no exploration, for fair eval comparison).
     """
     import torch
-    from src.utils.features import compute_static_features
-    from src.utils.budget_features import compute_budget_node_features
+    from src.utils.features import (
+        compute_static_features, build_graph_feature_cache,
+    )
+    from src.utils.budget_features import compute_budget_node_features_fast
 
     n = graph.number_of_nodes()
     results = []
 
+    # Pre-compute graph cache once (avoids O(n²) per step)
     try:
         static_feats = compute_static_features(graph)
+        feat_cache = build_graph_feature_cache(graph, static_feats)
     except Exception:
-        static_feats = None
+        feat_cache = None
 
     _edges = list(graph.edges())
     if _edges:
@@ -738,10 +746,12 @@ def evaluate_budget_aware_policy(
 
         while len(env.offered) < env.n and not env._check_bankrupt():
             try:
-                feats = compute_budget_node_features(
-                    graph, static_feats, env.S, env.offered, env.t, n,
-                    k=0, env=env,
-                )
+                if feat_cache is not None:
+                    feats = compute_budget_node_features_fast(
+                        feat_cache, env.S, env.offered, env.t, k=n, env=env,
+                    )
+                else:
+                    raise RuntimeError("no cache")
             except Exception:
                 feats = np.zeros((n, 21), dtype=np.float32)
 

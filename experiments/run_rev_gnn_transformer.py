@@ -80,7 +80,7 @@ def _eval_transformer(policy, graph, cfg, device):
     return revenue
 
 
-def _sanity_gate(policy, graph_small, device, logger):
+def _sanity_gate(policy, graph_small, device, logger, cfg=None):
     """10 greedy steps on n=50: check discounts are varied in (0,1).
 
     Returns True if gate passes (no discount collapse), False otherwise.
@@ -92,7 +92,7 @@ def _sanity_gate(policy, graph_small, device, logger):
     nodes = list(graph_small.nodes())
     statics = compute_static_features(graph_small)
     cache   = build_graph_feature_cache(graph_small, statics)
-    env = _make_env(graph_small, None, use_default_cfg=True)
+    env = _make_env(graph_small, cfg)
     env.reset()
     policy.reset_episode(device)
     off = frozenset()
@@ -163,7 +163,7 @@ def main():
 
     # ── Sanity gate: fresh-weights discounts must be varied ───────────────────
     logger.info("\n=== Sanity Gate (fresh weights, n=50) ===")
-    _sanity_gate(policy, sanity_graph, device, logger)
+    _sanity_gate(policy, sanity_graph, device, logger, cfg)
 
     # ── Phase 1: Transformer-aware CE + pricing MSE imitation ────────────────
     logger.info("\n=== Phase 1: Transformer Imitation (CE + pricing MSE) ===")
@@ -225,12 +225,15 @@ def main():
 
     # ── Post-Phase-1 sanity gate ──────────────────────────────────────────────
     logger.info("\n=== Post-P1 Sanity Gate ===")
-    _sanity_gate(policy, sanity_graph, device, logger)
+    _sanity_gate(policy, sanity_graph, device, logger, cfg)
     rev_p1 = _eval_transformer(policy, test_graph, cfg, device)
     logger.info(f"Post-P1 revenue (n=1000): {rev_p1:.2f}  (baseline: {GREEDY_BASELINE})")
     if rev_p1 < 300:
         logger.info("WARNING: Post-P1 revenue below 300 — check training stability")
     logger.log({"phase": 1, "rev_after_p1": rev_p1})
+    # Save P1 checkpoint (crash recovery — 18h of training)
+    torch.save(policy.state_dict(), "results/checkpoints/rev_gnn_transformer_p1.pt")
+    logger.info("Phase-1 checkpoint saved → results/checkpoints/rev_gnn_transformer_p1.pt")
 
     # ── Move to CPU (MPS corrupts autograd in no_grad context, same as LSTM) ──
     device_cpu = torch.device("cpu")
@@ -267,6 +270,7 @@ def main():
             if rev > best_rev:
                 best_rev   = rev
                 best_state = copy.deepcopy(policy.state_dict())
+                torch.save(best_state, "results/checkpoints/rev_gnn_transformer_best.pt")
 
     policy.load_state_dict(best_state)
     torch.save(best_state, "results/checkpoints/rev_gnn_transformer.pt")

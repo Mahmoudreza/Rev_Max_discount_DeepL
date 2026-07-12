@@ -1,0 +1,48 @@
+# configs/experiments/dp_upgrade_rice.yaml
+# DP-Upgrade evaluation on Rice-Facebook real network (n=443, m=9821).
+# Use --graph_pkl data/processed/rice_facebook.pkl --out_suffix _rice
+defaults:
+  - base_config
+
+project:
+  experiment_name: "dp_upgrade_rice_eval"
+
+graph:
+  type: "rice_facebook"     # informational only; graph loaded via --graph_pkl
+  n: 443
+
+influence:
+  model: "monotone"
+  b: 1.0
+  n_mc_samples: 200
+
+budget_constrained:
+  enabled: true
+  B: 5.0
+  production_cost: 0.3
+  sweep_k: [1, 2, 3, 5, 8, 10, 15, 20, 30, 40]
+
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  input_dim: 21
+
+sequence_model:
+  type: "lstm"
+  lstm_hidden: 128
+  lstm_n_layers: 1
+
+dp_upgrade:
+  n_classes: 5
+  n_sims: 30
+  delta: 0.05
+  resolve_every: 50
+
+bmin_fracs: [0.0, 0.25, 0.5]
+
+eval:
+  n_trials: 3
+  c: 0.3
+  weight_high: 2.0
+  seed: 42

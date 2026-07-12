@@ -1,0 +1,50 @@
+# configs/experiments/rev_gnn_transformer_300ep.yaml
+# Transformer training with EXACT LSTM recipe:
+#   Phase 1: CE+pricing-MSE 300 epochs  (vs 50 in original transformer config)
+#   Phase 1.5: SKIPPED
+#   Phase 2: REINFORCE 200 epochs, lr=1e-5, Welford, entropy=0.01, CPU
+
+project:
+  experiment_name: "rev_gnn_transformer"
+  seed: 42
+
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  dropout: 0.0
+
+transformer:
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  ffn_dim: 128
+  attention_window: 256
+  dropout: 0.0
+
+training:
+  algorithm: "imitation+reinforce"
+  imitation_epochs: 300           # ← LSTM recipe (was 50 in original config)
+  imitation_lr: 1.0e-3
+  pricing_loss_weight: 0.3
+  entropy_coef: 0.01
+  reinforce_epochs_phase2: 200
+  reinforce_lr: 1.0e-5
+  weight_decay: 0.0
+  grad_clip: 1.0
+  n_train_graphs: 5
+
+features:
+  dim: 20
+
+graph:
+  p: 0.37
+  pb: 0.32
+
+influence:
+  b: 1.0
+
+evaluation:
+  n_test_graphs: 1
+  n_trials: 5
+  test_n_nodes: 1000

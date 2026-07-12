@@ -125,7 +125,9 @@ def main() -> None:
 
     cfg = load_config_with_base(args.config)
     set_seed(cfg.project.seed)
-    device = get_device()
+    # Force CPU: aten::_sample_dirichlet is not implemented for MPS.
+    # Consistent with run_transformer_budget_training.py.
+    device = torch.device("cpu")
     logger = ExperimentLogger(cfg, run_name="budget_training")
 
     logger.info("Budget-Aware LSTM Training (Idea 3)")
@@ -321,7 +323,10 @@ def main() -> None:
         w_mean, w_std = _welford_get(welford[B_key])
 
         # advantage: how many std-devs above/below same-B mean is this episode
-        advantage_val = (total_rev - w_mean) / max(w_std, 1e-8)
+        # Clamp std to >= 1.0 to prevent advantage explosion when Welford has
+        # very few samples and revenues happen to be nearly equal (M2 ≈ 0).
+        # Matches the σ=1.0 returned by _welford_get before n >= 2.
+        advantage_val = (total_rev - w_mean) / max(w_std, 1.0)
 
         # Update Welford stats after computing advantage (no self-inflation)
         _welford_update(welford[B_key], total_rev)

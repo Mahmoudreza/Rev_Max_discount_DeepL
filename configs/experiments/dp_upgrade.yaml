@@ -1,0 +1,50 @@
+# configs/experiments/dp_upgrade.yaml
+# DP-Upgrade evaluation: calibrated + receding-horizon DP + oracle upper bound.
+# Copy of budget_constrained.yaml with additional dp_upgrade and bmin_fracs sections.
+defaults:
+  - base_config
+
+project:
+  experiment_name: "dp_upgrade_eval"
+
+graph:
+  type: "forest_fire"
+  n: 1000
+  p: 0.37
+  pb: 0.32
+
+influence:
+  model: "monotone"
+  b: 1.0
+  n_mc_samples: 200
+
+budget_constrained:
+  enabled: true
+  B: 5.0
+  production_cost: 0.3
+  sweep_k: [1, 2, 3, 5, 8, 10, 15, 20, 30, 40]
+
+encoder:
+  type: "graphsage"
+  hidden_dim: 64
+  n_layers: 2
+  input_dim: 21
+
+sequence_model:
+  type: "lstm"
+  lstm_hidden: 128
+  lstm_n_layers: 1
+
+dp_upgrade:
+  n_classes: 5
+  n_sims: 30
+  delta: 0.05
+  resolve_every: 50
+
+bmin_fracs: [0.0, 0.25, 0.5]
+
+eval:
+  n_trials: 3
+  c: 0.3
+  weight_high: 2.0
+  seed: 42

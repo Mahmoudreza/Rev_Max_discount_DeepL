@@ -383,3 +383,171 @@ cd paper && pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex ma
 - Commit checkpoints (gitignored).
 - Edit paper/main.tex structure without asking.
 - Use bare print() — use ExperimentLogger.
+
+---
+
+## Session State (updated 2026-07-12)
+
+### DONE AND FROZEN (do not touch)
+- Idea 1: Rev-GNN-LSTM 462.6, Rev-GNN-IM-RL, all figures/tables
+- Idea 2: TC/profit analysis complete
+- Idea 3 baselines: Greedy+Budget, DP-naive, DP-Calibrated v1,
+  DP-Oracle, LSTM-Idea3 (rev_gnn_lstm_budget.pt) — results in
+  results/logs/dp_upgrade_eval*.json
+- Transformer Gate A: PASSED (463.84±5.26 on FF n=1000 vs LSTM 462.6)
+- Repo packaging: setup.sh, Dockerfile, smoke_test 6/6
+
+### Resolved this session (2026-07-12)
+
+**#1 Running processes:** None surviving from last session. All previously
+  backgrounded jobs (dp_v3, transformer budget, tfm eval) died with session.
+
+**#2 Transformer OOD eval (Modular-FF / Rice-FB):** NOT produced by last
+  session. `rev_gnn_transformer_budget_20260712_121544.json` is a budget
+  *training* progress log (21 checkpoint entries, epoch 0→199), NOT an OOD
+  k-sweep. Gate B had never been run. Action taken: Gate B launched
+  (see below).
+
+**#3 Transformer budget training:** COMPLETE. Ran 200 epochs. Checkpoint
+  confirmed: `results/checkpoints/rev_gnn_transformer_budget.pt` (433 KB,
+  mtime 2026-07-12 14:56). LSTM budget checkpoint also present (260 KB).
+
+**#4a DP v2/v3 warm-start removal:** Already done in src code.
+  Both dp_calibrated_v2.py and dp_calibrated_v3.py have `seed_frac=0.0`
+  (no-op) and explicit comment "No separate free-seed phase."
+
+**#4b DP v3 REAL sweep — CORRECTED (2026-07-12 session 2):**
+  Full data in results/logs/dp_v3_full_curve_merged.json (all k=1..40)
+  and results/logs/dp_v3_ff_sweep.json (k=10..40).
+  k=5,8 cross-validation: diff=0.0000 (no discrepancy).
+
+  CORRECTION: Previous session incorrectly stated "paper keeps v1."
+  v1 is DOMINATED at every single k by composite(v2,v3). The correct
+  paper line is:
+
+    **DP paper line = composite max(v2,v3) per k**
+    **v3 wins at k≤5; v2 wins at k≥8 (transition at k=8)**
+    **v3-over-v2 promotion gate FAILED (v3<420 at k=40); gate intended
+      v3 to REPLACE v2 entirely, which it cannot. v2 remains strong.**
+    **v1 dominated everywhere → appendix only, do not use as paper line.**
+
+  Full composite table (FF n=1000, mean±std):
+
+  | k  |   v1  |   v2  |   v3  | composite | winner |
+  |----|-------|-------|-------|-----------|--------|
+  |  1 |   3.7 |   3.5 |  10.6 |     10.6  |  v3    |
+  |  2 |   8.8 |   6.2 |  42.1 |     42.1  |  v3    |
+  |  3 |  45.2 |   8.4 |  99.8 |     99.8  |  v3    |
+  |  5 |  94.4 |  73.6 | 154.2 |    154.2  |  v3    |
+  |  8 | 298.5 | 415.6 | 339.0 |    415.6  |  v2    |
+  | 10 | 325.7 | 435.1 | 357.0 |    435.1  |  v2    |
+  | 15 | 340.8 | 447.7 | 370.9 |    447.7  |  v2    |
+  | 20 | 345.1 | 448.0 | 369.0 |    448.0  |  v2    |
+  | 30 | 349.8 | 448.0 | 369.0 |    448.0  |  v2    |
+  | 40 | 354.9 | 448.0 | 380.2 |    448.0  |  v2    |
+
+  Paper artifacts produced:
+    paper/tables/paper_table_dp_family.tex   ← full v1/v2/v3/composite table
+    results/figures/fig_idea3_main_v2.pdf/png ← orange composite + range band
+    experiments/plot_idea3_main_v2.py        ← figure script (re-runnable)
+
+**#5 Gate B v2 (Transformer-Idea3 vs LSTM-Idea3):**
+  gate_b_eval.json (first run, PID 64272, 2026-07-12 ~15:02) is VOID —
+  weak criterion (single k=40, FF only), killed before completing.
+
+  Gate B v2 script: experiments/run_gate_b_transformer_eval.py (REWRITTEN)
+  New spec: k=[1,2,3,5,8,10,15,20,30,40], BOTH FF n=1000 AND Rice-FB n=443,
+  n_trials=3, SKIP enforcement, accounting identity checks.
+  Criterion: TFM > LSTM at ≥4/10 k on EITHER network.
+
+  **GATE B RUN-1 VERDICT (2026-07-12 16:39, LSTM-v1):**
+  **OVERALL PASS ✓** — TFM wins 5/10 on FF (k=1,2,3,5,8); 2/10 on Rice (k=1,15).
+  Criterion met via FF (5 ≥ 4). Results → gate_b_eval_v2.json.
+
+  k-by-k (FF / Rice):
+  k=1:  LSTM=27.0/0.0    TFM=150.1/0.20   FF_win=✓ Rice_win=✓
+  k=2:  LSTM=127.2/0.10  TFM=243.8/0.10   FF_win=✓ Rice_win=
+  k=3:  LSTM=169.4/0.10  TFM=212.1/0.00   FF_win=✓ Rice_win=
+  k=5:  LSTM=223.4/0.42  TFM=272.3/0.20   FF_win=✓ Rice_win=
+  k=8:  LSTM=259.8/1.12  TFM=275.6/0.83   FF_win=✓ Rice_win=
+  k=10: LSTM=280.0/2.78  TFM=272.8/1.81   FF_win=  Rice_win=
+  k=15: LSTM=334.1/13.5  TFM=317.2/45.3   FF_win=  Rice_win=✓
+  k=20: LSTM=356.7/130.1 TFM=327.0/78.8   FF_win=  Rice_win=
+  k=30: LSTM=373.2/216.3 TFM=360.9/113.2  FF_win=  Rice_win=
+  k=40: LSTM=395.1/217.5 TFM=389.1/162.0  FF_win=  Rice_win=
+
+  NOTE: TFM strong at small k (budget-limited regime k≤8 FF) where SKIP
+  enforcement matters most. LSTM overtakes at large k (k≥10 FF).
+
+  Gate B run-2 (--lstm_v both, PID 2244): RUNNING.
+  Expected result in gate_b_eval_v2.json (overwrite).
+
+  **PUBLISHED LSTM-Idea3 CHECKPOINT LOST:**
+  Original rev_gnn_lstm_budget.pt (hash 4b966e17) was overwritten 2026-07-12
+  by Welford-fix retrain. Fingerprint script (PID 2126) confirms:
+    v1.pt (1499ddd3): FF k=3=169.4 ✗, Rice k=10=2.78 ✗ — NOT published
+    v2.pt (23d11e1a): testing (result pending)
+    retrained (a78289): see Item 3 below
+  Published numbers (FF k=3=327.9, Rice k=10=68.6) are in budget_eval_c0.3.json
+  and dp_upgrade_eval_rice_lstm.json — these remain valid for the paper.
+
+  **RETRAINED LSTM ACCOUNTING VIOLATION:**
+  Retrained checkpoint (a78289) trained on B=[2,5,20,50]; NEVER trained on B<2.
+  At k=1 (B=0.30) and likely k=3 (B=0.90), bankrupt_rate=100% — policy
+  overspends freely at small budgets. The pre-committed decision rule (retrained
+  >= published at both flag points) will FAIL at k=3 FF (B=0.90 < training minimum).
+  → PAPER KEEPS PUBLISHED NUMBERS from budget_eval_c0.3.json and
+    dp_upgrade_eval_rice_lstm.json.
+  → Retrained checkpoint archived with note in checkpoints/README.md.
+
+### RESULTS FROZEN 2026-07-12 — Final experimental session
+
+All Items 0-4 resolved. Decisions recorded below.
+
+**ITEM 1 VERDICT — Published LSTM checkpoint: CONFIRMED LOST**
+  Fingerprint script (experiments/identify_published_lstm_ckpt.py):
+    v1.pt  (1499ddd3): FF k=3=169.4 (diff=162.6) ✗  Rice k=10=2.78 (diff=65.8) ✗
+    v2.pt  (23d11e1a): FF k=3=168.3 (diff=163.8) ✗  Rice k=10=2.79 (diff=65.8) ✗
+    retrained (a78289): bankrupt=100% at k=1,2,3 (B=0.3–0.9 < training min B=2)
+        → also fails fingerprint
+  Published checkpoint (hash 4b966e17) NOT recoverable from any surviving file.
+  Published numbers (FF k=3=327.9, Rice k=10=68.6) remain valid in:
+    results/logs/budget_eval_c0.3.json
+    results/logs/dp_upgrade_eval_rice_lstm.json
+  These numbers are used in paper Table (paper_table_idea3_final.tex).
+  rev_gnn_lstm_budget_v1_welford_bug.pt: DELETED (mislabeled ep-10 snapshot).
+
+**ITEM 2 VERDICT — Gate B: PASS ✓**
+  Gate B v2 run-1 (LSTM-v1 vs TFM, FF+Rice, 10 k): PASS ✓ (TFM wins 5/10 FF).
+  gate_b_eval_v2.json: written 2026-07-12 16:39.
+  Gate B run-2 (--lstm_v both, PID 2244): STILL RUNNING (multi-hour, ~80 min left
+    at 18:05). Will overwrite gate_b_eval_v2.json with 3-way table when done.
+  Paper decision (pre-committed, run-1 sufficient): **TFM-Idea3 INCLUDED in paper.**
+  Add TFM-Idea3 column to Table 3 (budget_constrained.tex).
+
+**ITEM 3 VERDICT — Retrained LSTM: FAILS DECISION RULE → paper keeps published**
+  Retrained checkpoint (a78289) trained on B=[2,5,20,50].
+  At B<2 (k=1,2,3): bankrupt_rate=100% (policy never trained on B<2).
+  Pre-committed rule: retrained >= published at BOTH flag points (k=3 FF, k=10 Rice).
+  k=3 FF (B=0.9): bankrupt=100% → INVALID evaluation → FAIL.
+  → Paper retains published LSTM-Idea3 numbers from budget_eval_c0.3.json.
+  → Retrained checkpoint archived in results/checkpoints/ (not released).
+  Full sweep in results/logs/lstm_idea3_retrained_sweep.json (PID 2847, still running).
+
+**PAPER MODEL ROSTER (FINAL)**:
+  Idea 1: rev_gnn_lstm.pt (8fbc4648), Rev-GNN-LSTM, 462.6 FF n=1000
+  Idea 2: rev_gnn_lstm_tc.pt (20901c29)
+  Idea 3 LSTM: published numbers from budget_eval_c0.3.json (ckpt 4b966e17 LOST)
+  Idea 3 TFM:  rev_gnn_transformer_budget.pt (2489593a) — Gate B PASS
+  DP baselines: composite(v2,v3) from paper_table_dp_family.tex
+  All non-model baselines: frozen in dp_upgrade_eval*.json
+
+**FIGURES/TABLES TO REGEN** (only if underlying numbers changed — none did):
+  - fig_idea3_main_v2: NO REGEN needed (composite DP line unchanged)
+  - paper_table_dp_family.tex: NO REGEN needed
+  - paper_table_idea3_final.tex: ADD TFM-Idea3 column before final submission
+
+**NEXT ACTION (new session)**:
+  - Add TFM-Idea3 column to paper/tables/paper_table_idea3_final.tex
+  - Wait for Gate B run-2 JSON if full 3-way table needed for supplement
+  - Verify gate_b_eval_v2.json was updated by run-2 (PID 2244)

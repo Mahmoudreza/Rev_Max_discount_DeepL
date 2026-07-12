@@ -17,7 +17,10 @@ Usage:
 """
 
 import numpy as np
-from src.utils.features import compute_static_features, compute_node_features
+from src.utils.features import (
+    compute_static_features, compute_node_features,
+    build_graph_feature_cache, compute_node_features_fast,
+)
 
 
 def compute_budget_node_features(
@@ -64,4 +67,37 @@ def compute_budget_node_features(
     budget_frac = float(env.budget_fraction)
     budget_col  = np.full((n, 1), budget_frac, dtype=np.float32)
 
+    return np.concatenate([base_features, budget_col], axis=1)  # (n, 21)
+
+
+def compute_budget_node_features_fast(
+    cache: dict,
+    S: frozenset,
+    offered: frozenset,
+    t: int,
+    k: int,
+    env,
+    group_labels=None,
+) -> np.ndarray:
+    """Fast 21-dim budget features using precomputed graph cache (~5-8× speedup).
+
+    Args:
+        cache:   Output of build_graph_feature_cache(graph, static_features).
+        S:       Current seed set.
+        offered: Already-offered nodes.
+        t:       Current step.
+        k:       Used for round_ratio normalisation (pass n for full-episode eval).
+        env:     BudgetRevenueEnv instance.
+        group_labels: Optional.
+
+    Returns:
+        np.ndarray of shape (n, 21).
+    """
+    base_features = compute_node_features_fast(
+        cache, S, offered, t, k, env, group_labels,
+    )  # (n, 20)
+
+    n = cache["n"]
+    budget_frac = float(env.budget_fraction)
+    budget_col  = np.full((n, 1), budget_frac, dtype=np.float32)
     return np.concatenate([base_features, budget_col], axis=1)  # (n, 21)

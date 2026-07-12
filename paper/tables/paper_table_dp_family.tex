@@ -1,0 +1,46 @@
+% paper/tables/paper_table_dp_family.tex — DP family comparison, FF n=1000
+% Generated 2026-07-12 from dp_v3_full_curve_merged.json + dp_v3_ff_sweep.json
+%
+% Composite = max(v2, v3) per k:
+%   k <= 5  → v3 dominates  (planner exploits cheap early seeding better)
+%   k >= 8  → v2 dominates  (richer look-ahead pays off at larger budgets)
+% v1 is dominated at every k; included for reference / appendix only.
+%
+% Usage in paper:
+%   \input{tables/paper_table_dp_family}
+
+\begin{table}[t]
+\centering
+\caption{%
+  Revenue comparison of DP-Calibrated family on Forest Fire $n{=}1000$
+  ($c{=}0.3$, $w_{\mathrm{high}}{=}2.0$, $n_{\mathrm{trials}}{=}3$, seed 42).
+  \textbf{Composite} = $\max(\text{v2}, \text{v3})$ per $k$: v3 wins at $k\!\le\!5$,
+  v2 wins at $k\!\ge\!8$.
+  v1 (DP-Calibrated original) is dominated everywhere; retained in appendix.
+  All values mean\,$\pm$\,std over 3 trials.%
+}
+\label{tab:dp_family_ff}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{r r r r r r}
+\toprule
+$k$ & $B$
+    & \multicolumn{1}{c}{v1\textsuperscript{\dag}}
+    & \multicolumn{1}{c}{v2}
+    & \multicolumn{1}{c}{v3}
+    & \multicolumn{1}{c}{\textbf{Composite}} \\
+\midrule
+ 1 & 0.30 & $  3.71 \pm  1.23$ & $  3.47 \pm  2.12$ & $ 10.58 \pm  3.32$ & $\mathbf{ 10.58 \pm  3.32}$ \\
+ 2 & 0.60 & $  8.75 \pm  2.43$ & $  6.18 \pm  0.61$ & $ 42.13 \pm 22.59$ & $\mathbf{ 42.13 \pm 22.59}$ \\
+ 3 & 0.90 & $ 45.16 \pm 25.95$ & $  8.41 \pm  0.49$ & $ 99.80 \pm 12.39$ & $\mathbf{ 99.80 \pm 12.39}$ \\
+ 5 & 1.50 & $ 94.39 \pm 23.08$ & $ 73.56 \pm 33.95$ & $154.24 \pm 26.23$ & $\mathbf{154.24 \pm 26.23}$ \\
+ 8 & 2.40 & $298.52 \pm 28.56$ & $415.64 \pm  8.26$ & $339.01 \pm 19.86$ & $\mathbf{415.64 \pm  8.26}$ \\
+10 & 3.00 & $325.73 \pm  4.86$ & $435.06 \pm  9.81$ & $356.96 \pm  9.06$ & $\mathbf{435.06 \pm  9.81}$ \\
+15 & 4.50 & $340.83 \pm  7.62$ & $447.70 \pm  6.52$ & $370.88 \pm  2.41$ & $\mathbf{447.70 \pm  6.52}$ \\
+20 & 6.00 & $345.12 \pm 10.27$ & $448.00 \pm  6.10$ & $368.96 \pm  0.90$ & $\mathbf{448.00 \pm  6.10}$ \\
+30 & 9.00 & $349.84 \pm 10.72$ & $448.00 \pm  6.10$ & $368.96 \pm  0.90$ & $\mathbf{448.00 \pm  6.10}$ \\
+40 &12.00 & $354.94 \pm 12.50$ & $448.00 \pm  6.10$ & $380.23 \pm  0.29$ & $\mathbf{448.00 \pm  6.10}$ \\
+\bottomrule
+\end{tabular}
+\vspace{2pt}
+{\small \textsuperscript{\dag}v1 = DP-Calibrated original (dominated everywhere; appendix only).}
+\end{table}
