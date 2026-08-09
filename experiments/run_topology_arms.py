@@ -21,6 +21,14 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import networkx as nx
+
+# ── Approximate betweenness (faster for dense BA graphs) ─────────────────────
+_orig_bc = nx.betweenness_centrality
+def _approx_bc(G, normalized=True, **kwargs):
+    k_pivots = min(100, G.number_of_nodes())
+    return _orig_bc(G, k=k_pivots, normalized=normalized, **kwargs)
+nx.betweenness_centrality = _approx_bc
+
 from src.env.ba_generators import BA_CONFIGS, generate_ba, ba_degree_stats, check_feature_anomalies
 from src.env.graph_generators import generate_forest_fire
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
@@ -163,8 +171,14 @@ def _eval_one_episode(policy, G, cache, ei, k, seed, device):
     return rev
 
 def phase1(policy, trajs, device, label):
+    # Precompute caches ONCE for all unique graphs (avoids betweenness per epoch)
+    print(f"[{label}] Phase 1: precomputing caches for {len(set(id(t[3]) for t in trajs))} unique graphs...")
+    graph_cache={}
+    for (gi,k,traj,G) in trajs:
+        if id(G) not in graph_cache:
+            graph_cache[id(G)]=(build_graph_feature_cache(G,compute_static_features(G)), _edge_index(G,device))
+    print(f"[{label}] Caches ready. Starting {PH1_EPOCHS} epochs (pool={len(trajs)} → {SUBSAMPLE}/epoch)")
     opt=torch.optim.Adam(policy.parameters(),lr=3e-4)
-    print(f"[{label}] Phase 1: {PH1_EPOCHS} epochs imitation ({len(trajs)} trajs pool → {SUBSAMPLE}/epoch)")
     ce_fn=nn.CrossEntropyLoss()
     mse_fn=nn.MSELoss()
     for ep in range(PH1_EPOCHS):
@@ -174,8 +188,7 @@ def phase1(policy, trajs, device, label):
         policy.train()
         for (gi,k,traj,G) in batch:
             if not traj: continue
-            cache=build_graph_feature_cache(G,compute_static_features(G))
-            ei=_edge_index(G,device)
+            cache,ei=graph_cache[id(G)]
             cfg=BudgetEnvConfig(budget_B=k*C,production_cost=C,seed=0,weight_high=WEIGHT_HIGH)
             env=BudgetRevenueEnv(G,cfg); env.reset()
             policy.reset_episode(device)
@@ -205,6 +218,12 @@ def phase1(policy, trajs, device, label):
 # ── Phase 2: REINFORCE ────────────────────────────────────────────────────────
 
 def phase2(policy, train_graphs, device, label):
+    # Precompute caches ONCE
+    print(f"[{label}] Phase 2: precomputing caches for {len(train_graphs)} graphs...")
+    graph_cache={}
+    for G in train_graphs:
+        if id(G) not in graph_cache:
+            graph_cache[id(G)]=(build_graph_feature_cache(G,compute_static_features(G)), _edge_index(G,device))
     opt=torch.optim.Adam(policy.parameters(),lr=PH2_LR)
     # Per-bucket Welford running mean/var
     wf_n=[0]*len(BUCKETS); wf_mean=[0.0]*len(BUCKETS); wf_M2=[1.0]*len(BUCKETS)
@@ -217,8 +236,7 @@ def phase2(policy, train_graphs, device, label):
         seed_ep=random.randint(0,9999)
         cfg=BudgetEnvConfig(budget_B=k*C,production_cost=C,seed=seed_ep,weight_high=WEIGHT_HIGH)
         env=BudgetRevenueEnv(G,cfg); env.reset()
-        cache=build_graph_feature_cache(G,compute_static_features(G))
-        ei=_edge_index(G,device)
+        cache,ei=graph_cache[id(G)]
         policy.train(); policy.reset_episode(device)
         log_probs=[]; baselines=[]; rewards=[]; rev=0.0
         for _ in range(G.number_of_nodes()):
