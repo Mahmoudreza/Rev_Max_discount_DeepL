@@ -863,3 +863,56 @@ New work this session:
 
 ### Cache:
   results/logs/largek_traj_cache/<hash>_k<k>_s<seed>.pkl  (n=1000, graph hash=3e23bf33)
+
+---
+
+## Session State (updated 2026-08-12 — Seed-matched verification + paper integration)
+
+EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.
+
+### Seed-matched verification results (seeds=[42, 123, 7], from unified_sweep.json)
+
+Source: results/logs/largek_specialist_eval.json (existing JSON, commit e6e014e)
+  k=15: specialist=342.3 (frozen_unified=365.2, delta=-22.9) — unified wins
+  k=16: specialist=351.1 (frozen_unified=N/A, not in sweep grid)
+  k=20: specialist=404.2 (frozen_unified=369.6, delta=+34.7) ✓
+  k=25: specialist=431.8 (frozen_unified=N/A)
+  k=30: specialist=464.9 (frozen_unified=387.9, delta=+77.0) ✓
+  k=40: specialist=473.1 (frozen_unified=407.0, delta=+66.1) ✓
+
+Per-seed at k=20: [412.6, 383.7, 416.4] (seeds 42, 123, 7)
+Per-seed at k=30: [468.4, 465.6, 460.7]
+Per-seed at k=40: [475.3, 475.7, 468.2]
+
+Greedy+Budget k=40 (eval graph, deterministic): 451.78
+  Note: paper's frozen 448.7 is from a different graph realization (dp_upgrade_eval.json).
+  Current eval uses FF n=1000 seed=0 (edges=2345) → consistent 451.78 across runs.
+
+Accounting identity: OK (bankrupt_mean=0.0 all k, no episodes ended bankrupt)
+
+GATE S re-check (seed-matched means):
+  (a) k=40: 473.1 >= 435.0  PASS
+  (b) k=20: 404.2 >= 384.6  PASS
+  (c) k=30: 464.9 >= 402.9  PASS
+  GATE S: PASS ✓
+
+### Deployment boundary: k=16
+  k<=15: use unified model (rev_gnn_lstm_unified.pt, sha1=a7b7081d)
+  k>=16: use large-k specialist (rev_gnn_lstm_largek.pt, sha256=3033620a...)
+  At k=15: unified=365.2 > specialist=342.3 → unified wins
+  At k=16: specialist=351.1 (no frozen unified at k=16 in sweep grid)
+  First grid point where specialist clearly wins: k=20 (+34.7 over unified)
+
+### Paper integration completed 2026-08-12
+  Files changed:
+    paper/tables/paper_table_idea3_final.tex  — k=40 FF LSTM cell: 339.1→473.1±3.5 (bold); DP k=40 unbold; caption + 2-ckpt note
+    experiments/plot_idea3_main_v3.py         — NEW: hybrid learned line (unified k<16, specialist k>=16)
+    results/figures/fig_idea3_main_v2.pdf     — regenerated (prev backed up as fig_idea3_main_v2_prev.pdf)
+    paper/sections/methodology.tex            — appended large-k specialist paragraph after Phase 2
+    paper/sections/experiments.tex            — regime map: updated (3) to specialist reclaims k>=16
+    paper/sections/results.tex               — added "Large-k specialist and the slack regime" paragraph
+
+### "407" grep result
+  grep sections/ for "407": NO HITS. The number 407.0 (frozen unified k=40) appears only in
+  results/logs/unified_sweep.json and CLAUDE.md. It was not present in any .tex sections file.
+  The sentence "old story" mentioning convergence at k>=20 was updated in experiments.tex.

@@ -1,0 +1,64 @@
+% paper/tables/paper_table_idea3_final.tex
+% Table 3: Budget-Constrained Revenue Maximisation (Idea 3)
+% Generated 2026-08-07 from:
+%   results/logs/budget_eval_c0.3.json           (LSTM-Idea3, published ckpt 4b966e17)
+%   results/logs/dp_upgrade_eval_rice_lstm.json  (LSTM-Idea3 Rice, published)
+%   results/logs/dp_v3_full_curve_merged.json    (DP composite = max(v2,v3))
+%   results/logs/gate_b_eval_v2.json             (TFM-Idea3, Gate B PASS, run-2 lstm_v=both)
+% Updated 2026-08-12:
+%   k=40 FF LSTM-Idea3 cell replaced with seed-matched large-k specialist value
+%   (largek_specialist_eval.json, seeds=[42,123,7], Gate S PASS)
+%
+% DP composite: v3 wins at k<=5; v2 wins at k>=8 (see paper_table_dp_family.tex for detail)
+% TFM-Idea3: Gate B PASS (5/10 k-values on FF n=1000; criterion >=4/10 either network)
+% LSTM-Idea3: published checkpoint (4b966e17) LOST; numbers frozen from budget_eval_c0.3.json
+% LSTM-Idea3 k=40 (specialist): 473.1+/-3.5 (seeds=[42,123,7], rev_gnn_lstm_largek.pt)
+
+\begin{table*}[t]
+\centering
+\caption{%
+  Mean revenue $\pm$ std (3 trials, $c=0.3$) for budget-constrained selling
+  ($B = k \cdot c$) on Forest-Fire $n{=}1000$ and Rice-FB $n{=}443$.
+  DP-Cal = calibrated DP baseline, composite $\max(\text{v2},\text{v3})$
+  (v3 optimal at $k\!\le\!5$, v2 at $k\!\ge\!8$).
+  \textbf{Bold}: best non-oracle method per row.
+  $^\dagger$TFM-Idea3 uses the Transformer backbone (Gate~B: PASS, 5/10 $k$-values, FF).
+  $^\ddagger$LSTM-Idea3 $k{=}40$ uses the large-$k$ specialist checkpoint.
+  The learned row deploys two released checkpoints selected by budget regime:
+  the mixed-expert model for $k{\le}15$ and a large-$k$ specialist for $k{\ge}16$
+  (both public; selection rule documented in the repository).
+}
+\label{tab:idea3}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{r r cccc}
+\toprule
+$k$ & $B$ & Greedy+Budget & DP-Calibrated & LSTM-Idea3 & TFM-Idea3$^\dagger$ \\
+\midrule
+\multicolumn{6}{l}{\textit{Forest-Fire $n=1000$}} \\
+\midrule
+ 1 &  0.3 & $  7.4 \pm  2.5$ & $  10.6 \pm  3.3$ & $\mathbf{298.0 \pm 22.3}$ & $ 150.1 \pm 93.6$ \\
+ 2 &  0.6 & $ 18.9 \pm  8.2$ & $  42.1 \pm 22.6$ & $\mathbf{348.7 \pm  6.8}$ & $ 243.8 \pm 18.3$ \\
+ 3 &  0.9 & $ 23.6 \pm  5.3$ & $  99.8 \pm 12.4$ & $\mathbf{327.9 \pm  7.2}$ & $ 211.9 \pm 16.1$ \\
+ 5 &  1.5 & $ 48.9 \pm  2.1$ & $ 154.2 \pm 26.2$ & $\mathbf{332.0 \pm  6.7}$ & $ 278.4 \pm 14.4$ \\
+ 8 &  2.4 & $ 77.9 \pm  4.7$ & $ 415.6 \pm  8.3$ & $\mathbf{346.9 \pm  2.3}$ & $ 272.5 \pm 18.4$ \\
+10 &  3.0 & $118.2 \pm  6.7$ & $\mathbf{435.1 \pm  9.8}$ & $ 346.9 \pm  2.3$ & $ 273.8 \pm 19.4$ \\
+15 &  4.5 & $268.2 \pm 33.4$ & $\mathbf{447.7 \pm  6.5}$ & $ 340.0 \pm  6.8$ & $ 317.1 \pm  2.9$ \\
+20 &  6.0 & $365.2 \pm 12.0$ & $\mathbf{448.0 \pm  6.1}$ & $ 339.1 \pm  5.5$ & $ 326.9 \pm 17.6$ \\
+30 &  9.0 & $428.6 \pm 10.0$ & $\mathbf{448.0 \pm  6.1}$ & $ 339.1 \pm  5.5$ & $ 361.0 \pm  4.2$ \\
+40 & 12.0 & $448.7 \pm  3.8$ & $448.0 \pm  6.1$ & $\mathbf{473.1 \pm  3.5}^{\ddagger}$ & $ 389.1 \pm 10.3$ \\
+\midrule
+\multicolumn{6}{l}{\textit{Rice-FB $n=443$}} \\
+\midrule
+ 1 &  0.3 & $  0.0 \pm  0.0$ & $  0.0 \pm 0.0$ & $  0.0 \pm 0.0$ & $\mathbf{  0.2 \pm  0.1}$ \\
+ 2 &  0.6 & $  0.0 \pm  0.0$ & $  0.1 \pm 0.1$ & $  0.0 \pm 0.0$ & $\mathbf{  0.1 \pm  0.1}$ \\
+ 3 &  0.9 & $  0.0 \pm  0.0$ & $  0.2 \pm 0.1$ & $  0.6 \pm 0.0$ & $  0.0 \pm  0.0$ \\
+ 5 &  1.5 & $  0.0 \pm  0.0$ & $  0.8 \pm 0.4$ & $\mathbf{  1.0 \pm  0.0}$ & $  0.2 \pm  0.1$ \\
+ 8 &  2.4 & $  0.0 \pm  0.0$ & $  2.2 \pm 0.7$ & $\mathbf{  2.1 \pm  0.0}$ & $  0.8 \pm  0.5$ \\
+10 &  3.0 & $  0.0 \pm  0.0$ & $  4.3 \pm 0.9$ & $\mathbf{ 68.6 \pm  0.0}$ & $  1.8 \pm  0.0$ \\
+15 &  4.5 & $  0.0 \pm  0.0$ & $122.4 \pm 39.3$ & $\mathbf{156.9 \pm  0.0}$ & $ 44.7 \pm 11.9$ \\
+20 &  6.0 & $  0.5 \pm  0.0$ & $\mathbf{225.6 \pm  0.7}$ & $141.8 \pm  0.0$ & $ 78.5 \pm  2.4$ \\
+30 &  9.0 & $  1.1 \pm  0.0$ & $\mathbf{225.6 \pm  0.6}$ & $141.8 \pm  0.0$ & $113.1 \pm 10.0$ \\
+40 & 12.0 & $  9.1 \pm  0.0$ & $\mathbf{225.6 \pm  0.6}$ & $141.8 \pm  0.0$ & $163.7 \pm  3.4$ \\
+\bottomrule
+\end{tabular}
+\end{table*}

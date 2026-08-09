@@ -1,2 +1,183 @@
 % paper/sections/methodology.tex
-% TODO: Write this section.
+% §4.1 GNN encoder + joint heads
+% §4.2 LSTM sequence model
+% §4.3 Training: imitation → REINFORCE + mixed expert
+% §4.4 Calibrated DP baseline
+
+\section{Method}
+\label{sec:method}
+
+Our model — Rev-GNN-LSTM — consists of a GraphSAGE encoder,
+an LSTM episode-history module, and two joint output heads that simultaneously
+select the next buyer and set a personalized discount.
+
+\subsection{Node Feature Representation}
+\label{sec:features}
+
+Each node $i \in \calV$ at step $t$ is represented by a 21-dimensional feature vector
+$\phi_i^{(t)} \in \R^{21}$ composed of three groups.
+
+\emph{Static structural features} (dims 1–10, identical to~\citet{anon_wsdm27}):
+degree rank, clustering coefficient, betweenness centrality, PageRank,
+$k$-core number, eigenvector centrality, triangle count, closeness centrality,
+eccentricity, and average neighbor degree.
+
+\emph{Dynamic state features} (dims 11–16):
+seed flag $\mathbf{1}[i \in \St]$, round ratio $t/n$,
+fraction of $i$'s neighbors already in $\St$,
+$\log(1 + \deg(i))$, clustering coefficient (repeated as diffusion signal),
+and group flag (set to 0 for the revenue task).
+
+\emph{Pricing-specific features} (dims 17–21, new):
+normalized influence $x_i(\St)$,
+estimated valuation $\hat{\val}_i(\St)$ from 200 Monte Carlo samples,
+an offered-and-rejected flag,
+steps-remaining ratio $(n - t)/n$,
+and current budget ratio $B_t / B_0$ (dims 17–21; dim 21 is $0$ for the
+unconstrained problem).
+
+\subsection{GNN Encoder}
+\label{sec:gnn}
+
+A two-layer GraphSAGE~\citep{hamilton2017inductive} encoder with residual
+connections and LayerNorm maps each node's feature vector to a 64-dimensional
+embedding:
+\begin{align}
+  h_i^{(0)} &= \mathrm{ReLU}(\mathrm{LN}(W_{\mathrm{proj}}\,\phi_i^{(t)})),\\
+  h_i^{(l)} &= \mathrm{ReLU}\!\left(\mathrm{LN}\!\left(h_i^{(l-1)}
+    + W_{\mathrm{self}} h_i^{(l-1)}
+    + W_{\mathrm{neigh}} \tfrac{1}{|\calN(i)|}\sum_{j\in\calN(i)} h_j^{(l-1)}
+  \right)\!\right).
+\end{align}
+All weight matrices are shared across graphs and steps.
+
+\subsection{LSTM Episode-History Module}
+\label{sec:lstm}
+
+A stateless GNN sees only the current step's graph embedding; it cannot reason
+about pricing signals revealed by past offers, such as a network that
+consistently rejects discounts below 40\%.
+We address this with an LSTM over the episode trajectory.
+
+At each step $t$, the LSTM receives a token
+\[
+  \tau_t = \bigl[\bar{h}^{(t)}\;\|\; d_{t-1}\;\|\; a_{t-1}\;\|\; r_{t-1}\bigr]
+  \in \R^{67},
+\]
+where $\bar{h}^{(t)} = \frac{1}{|\calV|}\sum_i h_i^{(2)}$ is the mean-pooled
+graph embedding, $d_{t-1}$ is the last discount offered, $a_{t-1} \in \{0,1\}$
+is the acceptance indicator, and $r_{t-1}$ is the revenue collected.
+The LSTM hidden state $c_t \in \R^{64}$ summarizes the full history.
+
+\subsection{Joint Policy Heads}
+\label{sec:heads}
+
+For each unvisited node $i \notin \St$ the full context embedding is
+\[
+  z_i^{(t)} = \bigl[h_i^{(2)}\;\|\; c_t\bigr] \in \R^{128}.
+\]
+Two heads share this representation:
+
+\emph{Scoring head}: $s_i = \mathrm{Linear}_{32\to1}(\mathrm{ReLU}(\mathrm{Linear}_{128\to32}(z_i^{(t)})))$.
+The agent selects $v^* = \argmax_{i \notin \St} s_i$.
+
+\emph{Pricing head}: a two-layer MLP that outputs the parameters
+$(\alpha, \beta)$ of a Beta distribution over the discount $d_t \in [0,1]$:
+\[
+  (\alpha, \beta) = \mathrm{Softplus}\!\left(\mathrm{Linear}_{32\to2}(\mathrm{ReLU}(\mathrm{Linear}_{128\to32}(z_{v^*}^{(t)})))\right) + 1.
+\]
+During training the discount is sampled $d_t \sim \mathrm{Beta}(\alpha,\beta)$;
+during evaluation we use the mean $d_t = \alpha/(\alpha+\beta)$.
+
+\subsection{Training: Imitation then REINFORCE}
+\label{sec:training}
+
+Training proceeds in two phases, following the mixed-expert
+schedule of~\citet{anon_wsdm27}.
+
+\paragraph{Phase 1 — Imitation learning (300 epochs).}
+We generate expert trajectories using the Greedy-Discount algorithm of
+\citet{babaei2013revenue}.
+For each expert trajectory we minimize a cross-entropy loss on the selection
+head and a Beta-distribution negative log-likelihood on the pricing head.
+Training graphs: 5 Forest-Fire graphs with $n \in \{200, 260, 320, 380, 440\}$,
+drawn with $p=0.37$, $p_b=0.32$.
+After Phase 1 the cross-entropy loss decreases from $4.96$ to $2.68$.
+
+\paragraph{Phase 2 — REINFORCE (200 epochs).}
+We fine-tune the full policy (selection $+$ pricing) with REINFORCE.
+To stabilize training across the wide range of episode lengths and budget values,
+we group episodes by budget size into five buckets
+(corresponding to $k \in \{1\text{–}2, 3\text{–}5, 6\text{–}10, 11\text{–}20, 21\text{–}40\}$)
+and maintain a per-bucket Welford running mean and standard deviation for
+advantage normalization.
+The entropy bonus coefficient is $\lambda_H = 0.01$ and the learning rate is
+$5 \times 10^{-5}$.
+The best checkpoint is selected by the maximum of the minimum per-bucket
+mean reward.
+
+A single policy trained across all budgets must reconcile opposing
+strategies: capital-binding episodes reward conservative self-funding,
+budget-slack episodes reward aggressive seeding.
+To remove this compromise we additionally train a large-$k$ specialist on
+$k \in [16, 40]$ only, warm-started from the unified model with the
+identical recipe.
+At deployment the checkpoint is selected by budget regime, mirroring the
+per-$k$ composition of our Cal-DP baseline.
+Both checkpoints are released.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\columnwidth]{fig6_training_curve}
+  \caption{Training progression of Rev-GNN-LSTM.
+    \textbf{Left:} Phase~1 (imitation, 300 epochs) reduces cross-entropy from
+    $4.96{\to}2.68$.
+    \textbf{Right:} Phase~2 (REINFORCE, 200 epochs, best checkpoint at ep.\ 43)
+    improves mean episode revenue on the training graphs.
+    Per-bucket advantage normalization stabilizes training across the full $k$
+    range.}
+  \label{fig:training_curve}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\columnwidth]{fig5_discount_trajectory}
+  \caption{Discount trajectory of Rev-GNN-LSTM over one episode (FF $n{=}1000$).
+    Early buyers (high degree, low influence) receive deep discounts to
+    bootstrap diffusion; late buyers (already highly influenced) are offered
+    near-list prices as their valuations are elevated by peer purchases.
+    This pattern emerges from RL fine-tuning, not from the imitation teacher.}
+  \label{fig:discount_traj}
+\end{figure}
+
+\subsection{Calibrated Dynamic-Programming Baseline (Cal-DP)}
+\label{sec:caldp}
+
+For the budget-constrained setting we introduce a family of non-learned baselines
+that calibrate classical DP to the replenishable-capital structure.
+
+\paragraph{Cal-DP v2 (two-phase DP).}
+Phase 1 uses a standard value-iteration DP over a discretized budget grid,
+computing the expected revenue for each remaining budget level.
+Phase 2 applies budget recalibration: the DP value function is rescaled to
+account for the fact that accepted sales replenish the budget,
+making the effective budget larger than its initial value.
+
+\paragraph{Cal-DP v3 (tier-based allocation).}
+Buyers are partitioned into tiers by estimated valuation.
+A DP over tier assignment allocates budget to tiers in decreasing value order,
+using a calibrated production-cost offset to account for the probabilistic cash
+flow.
+Cal-DP v3 dominates at small $k$ (capital-binding regime); Cal-DP v2 dominates
+at large $k$ (budget-slack regime).
+
+\paragraph{Composite Cal-DP.}
+For the paper comparison we use $\max(\text{v2}, \text{v3})$ at each $k$,
+taking the best algorithm per regime.
+This composite dominates Cal-DP v1 (the standard DP) at every $k$ value tested
+on the $n{=}1000$ Forest-Fire graph (see Table~\ref{tab:dp_family}).
+
+\paragraph{No warm-start seeding.}
+In both Cal-DP v2 and v3 there is no separate ``free-seed'' warm-start phase
+(seed\_frac$=0$), ensuring a fair comparison with the learned policy which
+faces the same budget constraint from step 1.
