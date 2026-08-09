@@ -971,3 +971,33 @@ Paper changes (2026-08-12):
   results/figures/fig_idea3_main_v2.pdf    — regenerated (prev backed up as _prev.pdf)
 
 EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.
+
+### Polblogs evaluation (2026-08-09)
+
+LOADER SANITY:
+  n=1222 m=16714 mean_deg=27.36 median=13 density=0.0224 max_deg=351
+  vs FF n=1000: mean_deg≈4.75, density≈0.005 (Polblogs 5.8x denser)
+  vs Rice-FB n=443: mean_deg≈21.4, density≈0.049 (comparable density)
+  undirected=True, feature matrix: no NaN/Inf
+
+EVAL (run_polblogs_eval.py, 333s):
+  Protocol (a) seed=42: IE=481.66 GD=525.73 IMRL=1.08 LSTM=370.37
+  Protocol (b) seeds 0..4: IE=446.18 IMRL=1.08 LSTM=374.16 GD=530.38
+    LSTM per-seed: [373.46, 373.81, 373.28, 374.56, 375.67]
+    LSTM vs Greedy margin: -29.5%  (LSTM trails GD significantly on Polblogs)
+  Saved: results/logs/polblogs_eval.json
+
+BUDGET SWEEP (run_polblogs_budget_sweep.py, 812s):
+  NOTE: Cal-DP column = 0.0 (n_sim arg mismatch in both dp_v2/v3 budget fns; soft error caught)
+  k | Greedy+B | CalDP | Learned  | lstm_v1 | bkr
+  1 |      7.4 |   0.0 |      6.3 |    21.2 | (v3)
+  3 |     34.3 |   0.0 |     10.1 |   388.6 | (v3)
+  5 |     50.4 |   0.0 |     19.2 |   399.7 | (v3)
+ 10 |     98.5 |   0.0 |    230.7 |   414.2 | (v3)
+ 15 |    139.4 |   0.0 |    423.9 |   471.4 | (v3)  ← Learned=unified
+ 20 |    173.4 |   0.0 |     56.2 |   480.3 | (v3)  ← Learned=specialist (k>=20)
+ 30 |    254.9 |   0.0 |     99.1 |   514.9 | (v3)  ← specialist
+ 40 |    392.0 |   0.0 |    299.3 |   525.6 | (v3)  ← specialist
+  Note: lstm_v1 dominates at all k; specialist checkpoint does NOT transfer to Polblogs well
+  Note: Cal-DP fix needed: remove n_sim= kwarg in run_polblogs_budget_sweep.py calls (lines 157/163)
+  Saved: results/logs/polblogs_budget_sweep.json
