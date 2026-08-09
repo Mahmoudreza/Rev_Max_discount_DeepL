@@ -26,6 +26,16 @@ nx.betweenness_centrality = _approx_bc
 
 from src.env.polblogs_loader import load_polblogs
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
+from src.env.revenue_env import RevenueEnv
+
+# Faster get_current_influence: iterate neighbors (O(deg)) not S (O(|S|))
+def _fast_gci(self, node):
+    nb = list(self.graph.neighbors(node))
+    if not nb: return 0.0
+    tw = sum(self._link_weights.get((node,n),0.0) for n in nb)
+    if tw==0: return 0.0
+    return sum(self._link_weights.get((node,n),0.0) for n in nb if n in self.S)/tw
+RevenueEnv.get_current_influence = _fast_gci
 from src.evaluation.budget_baselines import greedy_discount_budget
 from src.evaluation.dp_calibrated_v2 import dp_calibrated_v2_budget
 from src.evaluation.dp_calibrated_v3 import dp_calibrated_v3_budget
@@ -38,6 +48,7 @@ from src.utils.features import (
 
 # ── Constants ────────────────────────────────────────────────────────────────
 CKPT_DIR      = "results/checkpoints"
+# SELECTED unified = gatefail (sha8=00071438); reproduces frozen 369.6 at k=20
 UNIFIED_CKPT  = os.path.join(CKPT_DIR, "rev_gnn_lstm_unified_gatefail.pt")
 LARGEK_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_largek.pt")
 LSTMV1_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_budget_v1.pt")
@@ -143,13 +154,13 @@ def eval_caldp(graph, k):
     B   = k * C
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=0, weight_high=WEIGHT_HIGH)
     try:
-        r2 = dp_calibrated_v2_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sim=N_SIM)
+        r2 = dp_calibrated_v2_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIM)
         m2 = float(r2.get("revenue", {}).get("mean", r2.get("mean", 0.0)))
     except Exception as e:
         print(f"  Cal-DP v2 k={k} error: {e}")
         m2 = 0.0
     try:
-        r3 = dp_calibrated_v3_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sim=N_SIM)
+        r3 = dp_calibrated_v3_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIM)
         m3 = float(r3.get("revenue", {}).get("mean", r3.get("mean", 0.0)))
     except Exception as e:
         print(f"  Cal-DP v3 k={k} error: {e}")
@@ -163,8 +174,7 @@ def main():
     n_nodes = graph.number_of_nodes()
     print(f"Polblogs n={n_nodes} m={graph.number_of_edges()}")
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else
-                          "cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")  # CPU faster for n=1222 (low MPS dispatch latency)
     print(f"Device: {device}")
 
     # Verify checkpoint SHAs
