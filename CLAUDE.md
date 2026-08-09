@@ -1076,3 +1076,10 @@ NEXT SESSION:
   4. Commit results JSONs (force-add if needed)
   5. Update CLAUDE.md with gate verdicts
   6. If cal-DP done: update polblogs_budget_sweep.json from /tmp/pb_caldp_rerun.log
+
+### Perf fix + relaunch (2026-08-09 22:07)
+PERF BUG FOUND: compute_static_features (betweenness) was called 300× per epoch → 4.5h/epoch.
+FIX: precompute caches once before training loop (commit 8cf9e22).
+Relaunched: PID=21381, /tmp/topology_arms.log, nohup python -u experiments/run_topology_arms.py
+Approx betweenness: k=100 pivots (monkey-patch at top of training script).
+Epoch 0 computing (expected ~2-5 min with fix). Monitor: grep "P1 ep" /tmp/topology_arms.log
