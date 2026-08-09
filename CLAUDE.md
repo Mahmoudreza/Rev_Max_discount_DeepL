@@ -1001,3 +1001,40 @@ BUDGET SWEEP (run_polblogs_budget_sweep.py, 812s):
   Note: lstm_v1 dominates at all k; specialist checkpoint does NOT transfer to Polblogs well
   Note: Cal-DP fix needed: remove n_sim= kwarg in run_polblogs_budget_sweep.py calls (lines 157/163)
   Saved: results/logs/polblogs_budget_sweep.json
+
+### Topology-coverage experiment (2026-08-09 session started ~17:13)
+
+ITEM 0 — Cal-DP polblogs budget fix:
+  Fixed: n_sim= → n_sims= in run_polblogs_budget_sweep.py (lines 157,163)
+  Rerun launched: PID=89673 /tmp/pb_caldp_rerun.log (~800s, same k-table)
+  Python: /Users/reza/anaconda3/bin/python (torch 2.12.0)
+
+NEW FILES (commit 933764c):
+  src/env/ba_generators.py         — BA graph generator (10 configs n∈{200-440} m∈{8,12})
+  experiments/run_topology_arms.py — ARM A (BA-only) + ARM B (50/50 BA+FF) training
+  experiments/run_topology_arms_eval.py — Gate A/B eval script
+  experiments/run_polblogs_budget_sweep.py — PATCHED (n_sim→n_sims)
+
+TRAINING:
+  Launched: PID=90338 nice -n 10, /tmp/topology_arms.log
+  Warm-start: rev_gnn_lstm.pt sha8=8fbc4648 → 21-dim extension
+  ARM A → results/checkpoints/rev_gnn_lstm_ba.pt
+  ARM B → results/checkpoints/rev_gnn_lstm_densemix.pt
+  Phase 1: 200 epochs imitation (CE + 0.3*MSE)
+  Phase 2: 150 epochs REINFORCE (lr=1e-5, Welford std_floor=1.0, STD_FLOOR sentinel OK)
+  BA configs: 10 × (n,m) where n∈{200,260,320,380,440} m∈{8,12}
+  BA traj cache: results/logs/ba_traj_cache/
+  72h deadline: 2026-08-16 EOD
+
+NEXT SESSION (when training completes):
+  1. Check /tmp/topology_arms.log for completion + per-config means
+  2. Run: PY=/Users/reza/anaconda3/bin/python python3 experiments/run_topology_arms_eval.py > /tmp/arms_eval.log 2>&1
+  3. Report Gate A and Gate B verdicts from eval output
+  4. Check /tmp/pb_caldp_rerun.log for Cal-DP polblogs k-table
+  5. Update CLAUDE.md with all results + gate verdicts
+  6. Commit results JSONs
+
+GATE THRESHOLDS (hardcoded):
+  GATE A (arm_a, polblogs only): STRONG>=530.4  PARTIAL>=420.0  else FAIL
+  GATE B (arm_b, general): STRONG: polblogs>=530.4 AND FF1000>=440.0 AND Rice>=190.0
+                            PARTIAL: polblogs>=420.0 with same floors  else FAIL
