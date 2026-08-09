@@ -916,3 +916,26 @@ GATE S re-check (seed-matched means):
   grep sections/ for "407": NO HITS. The number 407.0 (frozen unified k=40) appears only in
   results/logs/unified_sweep.json and CLAUDE.md. It was not present in any .tex sections file.
   The sentence "old story" mentioning convergence at k>=20 was updated in experiments.tex.
+
+---
+
+## Session State (updated 2026-08-09 — Re-verification of seed-matched numbers)
+
+EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.
+
+### Re-verification run (2026-08-09, fresh eval of run_largek_eval.py)
+Seeds: [42, 123, 7] (from unified_sweep.json, confirmed)
+Graph: FF n=1000 seed=0 (edges=2345), same as specialist eval harness
+
+Fresh eval confirmed (partial, evals still running):
+  k=15: specialist=342.3 ✓ (matches frozen largek_specialist_eval.json)
+  k=16: specialist=351.1 ✓ (matches frozen)
+  Greedy+Budget k=40 = 451.78 (confirmed on graph seed=0)
+
+NOTE: run_unified_sweep.py uses graph seed=42; run_largek_eval.py uses seed=0.
+  The 448.7 "frozen" Greedy in task spec is from dp_upgrade_eval.json (different graph).
+  451.78 is the correct value for the specialist-eval harness (graph seed=0).
+
+Eval scripts added (not needed for paper, archive purpose only):
+  experiments/eval_unified_k16_25.py    — unified model at k=16,20,25
+  experiments/eval_protocol_unification.py — Greedy/DP/TFM re-run

@@ -104,3 +104,10 @@ All Idea-3 budget checkpoints use 21-dim input (vs 20-dim for Idea-1):
 - EpisodeTransformerSliding: `window=256`
 - TransformerJointPolicy: `gnn_dim=64, context_dim=transformer_dim`
 - Total params: 106,627 (vs LSTM 64,291)
+| rev_gnn_lstm_fair_l02.pt | 20d21529 | Fair-RL λ=0.2, warm-start rev_gnn_lstm.pt, REINFORCE 100 epochs, reward=rev/n+λ*min_rho, lr=1e-05 |
+| rev_gnn_lstm_fair_l05.pt | 13255745 | Fair-RL λ=0.5, warm-start rev_gnn_lstm.pt, REINFORCE 100 epochs, reward=rev/n+λ*min_rho, lr=1e-05 |
+| rev_gnn_lstm_fair_l10.pt | 225123ea | Fair-RL λ=1.0, warm-start rev_gnn_lstm.pt, REINFORCE 100 epochs, reward=rev/n+λ*min_rho, lr=1e-05 |
+
+| 2026-08-09 00:02 | rev_gnn_lstm_largek_p1.pt | sha256=39e3e373dcce33ca... | large-k specialist, warm-start from ep200 unified |
+
+| 2026-08-09 02:32 | rev_gnn_lstm_largek.pt | sha256=3033620abaf2d728... | large-k specialist, warm-start from ep200 unified |

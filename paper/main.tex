@@ -1,47 +1,146 @@
-% paper/main.tex — AAAI 2027 submission
-% DO NOT write section content here — edit paper/sections/*.tex
+%%
+%% Joint Seed Selection and Discounting for Revenue Maximization
+%% in Social Networks via Deep Reinforcement Learning
+%%
+%% Target venue: WSDM 2028 (ACM sigconf)
+%%
+%% ── COMPILE ──────────────────────────────────────────────────────────────────
+%%   pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+%%   (Overleaf: Menu → Compiler → pdfLaTeX)
+%%
+%% ── BLIND/CAMERA SWITCH ──────────────────────────────────────────────────────
+%%   Blind submission : \documentclass[sigconf,review,anonymous]{acmart}  ← THIS
+%%   Camera-ready    : \documentclass[sigconf]{acmart}  (uncomment real authors)
+%% ─────────────────────────────────────────────────────────────────────────────
 
-\documentclass[letterpaper]{article}
-\usepackage{aaai27}   % AAAI 2027 style
-\usepackage{times}
-\usepackage{helvet}
-\usepackage{courier}
-\usepackage{graphicx}
-\usepackage{amsmath,amssymb}
+\documentclass[sigconf,review,anonymous]{acmart}
+
+%% ── Math ─────────────────────────────────────────────────────────────────────
+\usepackage{amsmath, amssymb, amsthm}
+
+%% ── Tables ───────────────────────────────────────────────────────────────────
 \usepackage{booktabs}
-\usepackage{hyperref}
-\usepackage{cleveref}
+\usepackage{multirow}
+\usepackage{tabularx}
+
+%% ── Algorithms ───────────────────────────────────────────────────────────────
 \usepackage{algorithm}
 \usepackage{algpseudocode}
-\usepackage{xcolor}
 
-% ── Result macros — never hardcode numbers in sections ──────────────────────
-\newcommand{\bestrevenue}{XX.X}
-\newcommand{\baselinerevenue}{XX.X}
-\newcommand{\improvementpct}{XX.X}
-\newcommand{\speedup}{XXX}
-\newcommand{\npvgamma}{0.9}
-\newcommand{\modelname}{Rev-GAIL-RL-Rich}
+%% ── Figures ──────────────────────────────────────────────────────────────────
+\usepackage{subcaption}
+\graphicspath{{figures/}}              % all figures mirrored to paper/figures/
 
-% ── Document ─────────────────────────────────────────────────────────────────
+%% ── Float / spacing control ──────────────────────────────────────────────────
+\usepackage{placeins}
+\usepackage{float}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{6pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\setlength{\abovecaptionskip}{4pt}
+\setlength{\belowcaptionskip}{2pt}
+
+%% ── Enumeration ──────────────────────────────────────────────────────────────
+\usepackage{enumitem}
+
+%% ── Hyperlinks (loaded last to avoid clashes) ────────────────────────────────
+%% acmart loads hyperref internally; add options via:
+%% \hypersetup{hidelinks}
+
+%% ── Theorem environments ─────────────────────────────────────────────────────
+\newtheorem{definition}{Definition}
+\newtheorem{problem}{Problem}
+\newtheorem{proposition}{Proposition}
+
+%% ── Convenience math macros ──────────────────────────────────────────────────
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\calG}{\mathcal{G}}
+\newcommand{\calV}{\mathcal{V}}
+\newcommand{\calE}{\mathcal{E}}
+\newcommand{\calS}{\mathcal{S}}
+\newcommand{\St}{S_t}               % seed set at step t
+\newcommand{\val}{v}                % valuation function
+
+%% ── ACM metadata (suppressed for blind review) ───────────────────────────────
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\setcopyright{none}
+%% Fill in real values for camera-ready:
+\acmConference[WSDM '28]{The 21st ACM International Conference on Web Search
+  and Data Mining}{February 2028}{TBD}
+\acmYear{2028}
+\copyrightyear{2028}
+\acmISBN{}
+\acmDOI{}
+\acmPrice{}
+
+%% ── Title ────────────────────────────────────────────────────────────────────
 \title{Joint Seed Selection and Discounting for Revenue Maximization\\
        in Social Networks via Deep Reinforcement Learning}
 
-\author{[Authors blinded for review]}
+%% ── Authors (comment out entire block for blind submission;
+%%    anonymous class option already removes them, but keep consistent) ─────────
+%% Camera-ready: uncomment and fill in real affiliations
+%
+% \author{Fatemeh Seyedin}
+% \affiliation{\institution{Leibniz University Hannover}\country{Germany}}
+%
+% \author{Adrian Weller}
+% \affiliation{\institution{University of Cambridge}\country{United Kingdom}}
+%
+% \author{Mahmoudreza Babaei}
+% \affiliation{\institution{GISMA University of Applied Sciences}\country{Germany}}
+%
+% \renewcommand{\shortauthors}{Seyedin et al.}
 
+%% ═══════════════════════════════════════════════════════════════════════════
 \begin{document}
+
+%% ── Abstract (must appear before \maketitle in acmart) ───────────────────────
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
 \maketitle
 
-\input{sections/abstract}
+%% ── §1 Introduction ──────────────────────────────────────────────────────────
 \input{sections/introduction}
+
+%% ── §2 Related Work ──────────────────────────────────────────────────────────
 \input{sections/related_work}
+
+%% ── §3 Problem Formulation ───────────────────────────────────────────────────
+%%   §3.1 Babaei et al. (2013) — unconstrained revenue maximization
+%%   §3.2 Budget-constrained formulation (our extension)
 \input{sections/problem_formulation}
+
+%% ── §4 Method ────────────────────────────────────────────────────────────────
+%%   §4.1 GNN encoder + joint Beta heads
+%%   §4.2 LSTM sequence model
+%%   §4.3 Imitation → REINFORCE + mixed-expert training
+%%   §4.4 Calibrated dynamic-programming baseline
 \input{sections/methodology}
+
+%% ── §5 Experiments ───────────────────────────────────────────────────────────
+%%   §5.1 Unconstrained revenue (Idea 1): FF/Modular FF/Rice-FB sweep
+%%   §5.2 Profit and time-cost analysis (Idea 2 paragraph)
+%%   §5.3 Budget-constrained + regime map (Idea 3)
+%%   §5.4 Ablations
 \input{sections/experiments}
-\input{sections/results}
+
+%% ── §6 Conclusion + Limitations ─────────────────────────────────────────────
 \input{sections/conclusion}
 
-\bibliographystyle{aaai27}
+%% ── Bibliography ─────────────────────────────────────────────────────────────
+\bibliographystyle{ACM-Reference-Format}
 \bibliography{references}
+
+%% ── Appendix (after references; not counted against page limit) ──────────────
+%% WSDM policy: supplemental not reviewed; mark clearly.
+%\appendix
+%\section*{Appendix — Supplemental (not for review)}
+%\input{sections/appendix}
 
 \end{document}
