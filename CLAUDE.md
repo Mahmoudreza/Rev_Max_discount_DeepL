@@ -1038,3 +1038,41 @@ GATE THRESHOLDS (hardcoded):
   GATE A (arm_a, polblogs only): STRONG>=530.4  PARTIAL>=420.0  else FAIL
   GATE B (arm_b, general): STRONG: polblogs>=530.4 AND FF1000>=440.0 AND Rice>=190.0
                             PARTIAL: polblogs>=420.0 with same floors  else FAIL
+
+### Topology arms + Cal-DP status (2026-08-09 17:29)
+
+ITEM 0 — Cal-DP polblogs rerun (PID=92039, /tmp/pb_caldp_rerun.log):
+  Fix verified: k=1 CalDP=14.0 (was 0.0 before fix) — n_sim→n_sims working
+  Status: k=3 computing DP-v3 calibration on n=1222 (~slow; may take 1-4h total)
+  When done: update polblogs_budget_sweep.json; grep /tmp/pb_caldp_rerun.log for rows
+
+ITEM 1 — BA skew stats (from /tmp/topology_arms.log):
+  BA_n200_m8:  edges=1536 mean_deg=15.4 max/med=6.5  feats:zero_cols=[10-12,16-18]
+  BA_n200_m12: edges=2256 mean_deg=22.6 max/med=4.0
+  BA_n260_m8:  edges=2016 mean_deg=15.5 max/med=5.2
+  BA_n260_m12: edges=2976 mean_deg=22.9 max/med=6.5
+  BA_n320_m8:  edges=2496 mean_deg=15.6 max/med=7.6
+  BA_n320_m12: edges=3696 mean_deg=23.1 max/med=5.8
+  BA_n380_m8:  edges=2976 mean_deg=15.7 max/med=9.5
+  BA_n380_m12: edges=4416 mean_deg=23.2 max/med=6.7
+  BA_n440_m8:  edges=3456 mean_deg=15.7 max/med=10.3
+  BA_n440_m12: edges=5136 mean_deg=23.3 max/med=6.6
+  Note: max/med=4-10 vs polblogs=27. BA at n≤440 cannot match polblogs skew (would need n≈23K). Hub structure PRESENT at reduced scale.
+  Note: zero_cols=[10,11,12,16,17,18] = betweenness-related features; not NaN/Inf; training safe.
+
+TRAINING (PID=92040, /tmp/topology_arms.log):
+  ARM A cache building: 10 graphs × 7 k × 20 seeds = 1400 BA trajectories
+  Status: cache building in progress (17:27+)
+  After cache → Phase 1 imitation (200 epochs) → Phase 2 REINFORCE (150 epochs) → ARM B
+  Checkpoints when done:
+    results/checkpoints/rev_gnn_lstm_ba.pt
+    results/checkpoints/rev_gnn_lstm_densemix.pt
+  Python: /Users/reza/anaconda3/bin/python -u
+
+NEXT SESSION:
+  1. Check /tmp/topology_arms.log grep "DONE\|sha8=" for completion
+  2. If training done: run PY=/Users/reza/anaconda3/bin/python -u experiments/run_topology_arms_eval.py > /tmp/arms_eval.log 2>&1
+  3. Read /tmp/arms_eval.log for gate verdicts
+  4. Commit results JSONs (force-add if needed)
+  5. Update CLAUDE.md with gate verdicts
+  6. If cal-DP done: update polblogs_budget_sweep.json from /tmp/pb_caldp_rerun.log
