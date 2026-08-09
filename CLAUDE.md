@@ -939,3 +939,35 @@ NOTE: run_unified_sweep.py uses graph seed=42; run_largek_eval.py uses seed=0.
 Eval scripts added (not needed for paper, archive purpose only):
   experiments/eval_unified_k16_25.py    — unified model at k=16,20,25
   experiments/eval_protocol_unification.py — Greedy/DP/TFM re-run
+
+### Seed-matched specialist numbers (2026-08-12, confirmed from largek_specialist_eval.json)
+Seeds: [42, 123, 7] — source: unified_sweep.json
+Graph: FF n=1000, c=0.3, n_trials=3
+
+k-table (seed-matched means):
+  k=15: frozen_unified=365.21  specialist=342.27  delta=-22.94  dp_comp=447.7
+  k=16: frozen_unified=366.58  specialist=351.14  delta=-15.44  dp_comp=N/A
+  k=20: frozen_unified=369.58  specialist=404.24  delta=+34.66  dp_comp=448.0
+  k=25: frozen_unified=377.68  specialist=431.81  delta=+54.13  dp_comp=N/A
+  k=30: frozen_unified=387.92  specialist=464.89  delta=+76.97  dp_comp=448.0
+  k=40: frozen_unified=407.00  specialist=473.06  delta=+66.06  greedy=451.78  dp_comp=448.0
+
+Per-seed specialist values:
+  k=20: [412.57, 383.73, 416.40]
+  k=30: [468.44, 465.56, 460.67]
+  k=40: [475.35, 475.65, 468.18]
+
+Gate S re-check: PASS k40=473.06>=435.0  k20=404.24>=384.6  k30=464.89>=402.9
+Accounting identity: OK (bankrupt_mean=0.0 all k)
+
+Deployment boundary: k=20 (first k where specialist beats unified; k=15,16 unified wins)
+  Note: initial assumption was k=16; measured is k=20.
+
+Paper changes (2026-08-12):
+  paper/tables/paper_table_idea3_final.tex  — caption boundary k<=19/k>=20
+  paper/sections/results.tex               — boundary sentence updated k=20
+  paper/sections/methodology.tex           — specialist paragraph already present
+  experiments/plot_idea3_main_v3.py        — DEPLOYMENT_BOUNDARY=20
+  results/figures/fig_idea3_main_v2.pdf    — regenerated (prev backed up as _prev.pdf)
+
+EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.

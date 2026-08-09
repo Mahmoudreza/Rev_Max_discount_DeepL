@@ -36,8 +36,10 @@ not a fundamental limitation.
 Restricting training to $k \in [16, 40]$ and warm-starting from the unified
 model eliminates the opposing-gradient tension, yielding $473.1\,{\pm}\,3.5$
 at $k{=}40$ — exceeding both Cal-DP ($448.0$) and Greedy+Budget ($448.7$).
-The specialist is deployed for $k{\ge}16$; the unified model handles $k{\le}15$,
-where Cal-DP retains the strongest position in the transitional band.
+The specialist is deployed for $k{\ge}20$, where it reclaims the slack regime,
+exceeding both Cal-DP ($448.0$) and Greedy+Budget ($448.7$) at $k{=}40$;
+the unified model handles $k{\le}19$, and Cal-DP retains the strongest position
+in the transitional band ($k \in [8, 20]$).
 
 \paragraph{Transformer variant.}
 We also trained a Graph Transformer variant (Rev-GNN-Transformer) replacing the

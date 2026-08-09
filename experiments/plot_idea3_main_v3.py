@@ -2,14 +2,14 @@
 
 Produces results/figures/fig_idea3_main_v2.pdf (overwrites, after backup):
   • orange (solid thick):  Composite Cal-DP = max(v2, v3) per k
-  • blue   (solid):        Learned policy (unified for k<16; large-k specialist for k>=16)
+  • blue   (solid):        Learned policy (unified for k<20; large-k specialist for k>=20)
   • gray   (dashed):       Greedy+Budget
-  • vertical dotted line at k=16: deployment boundary (specialist regime starts)
+  • vertical dotted line at k=20: deployment boundary (specialist regime starts)
 
 Data sources:
   - DP composite: results/logs/dp_v3_full_curve_merged.json
-  - Unified model (k<16): results/logs/unified_sweep.json
-  - Specialist (k>=16):   results/logs/largek_specialist_eval.json
+  - Unified model (k<20): results/logs/unified_sweep.json
+  - Specialist (k>=20):   results/logs/largek_specialist_eval.json
   - Greedy+Budget:        hardcoded from paper_table_idea3_final.tex (frozen)
 
 DO NOT EDIT — regenerate only via this script.
@@ -35,7 +35,7 @@ LOG_DIR = ROOT / "results" / "logs"
 FIG_DIR = ROOT / "results" / "figures"
 FIG_DIR.mkdir(parents=True, exist_ok=True)
 
-DEPLOYMENT_BOUNDARY = 16  # k < 16 → unified; k >= 16 → specialist
+DEPLOYMENT_BOUNDARY = 20  # k < 20 → unified; k >= 20 → specialist (seed-matched measured boundary)
 
 
 def _load_dp_composite() -> tuple[list[int], np.ndarray, np.ndarray]:
@@ -167,7 +167,7 @@ def main() -> None:
     ax.set_ylabel("Revenue (mean ± std)", fontsize=11)
     ax.set_title(
         "Budget-Constrained Revenue — Forest Fire n=1000, c=0.3\n"
-        "Blue = hybrid learned (unified k<16, specialist k>=16)",
+        "Blue = hybrid learned (unified k<20, specialist k>=20)",
         fontsize=10,
     )
 
