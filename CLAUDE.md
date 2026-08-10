@@ -750,3 +750,41 @@ All Items 0-4 resolved. Decisions recorded below.
 3. NOTHING ELSE. Specialist results are VERIFIED FOUR TIMES (473.1/464.9/
    404.2, boundary k=20, commit c984b79) — do NOT re-run or re-verify them.
 Topology-arms training job: do not touch; gates print when it finishes.
+
+### Session 2026-08-10 Results
+
+**Polblogs Cal-DP (DONE):**
+k-table (all 8 k-values confirmed):
+  k=1:  caldp=14.0  v2=14.0  v3=13.3  greedy=7.4   learned=6.3   lstm_v1=25.6
+  k=3:  caldp=50.9  v2=50.9  v3=47.8  greedy=34.3  learned=10.2  lstm_v1=406.5
+  k=5:  caldp=94.7  v2=94.7  v3=94.3  greedy=50.4  learned=19.6  lstm_v1=400.1
+  k=10: caldp=187.1 v2=187.1 v3=179.8 greedy=98.5  learned=230.3 lstm_v1=404.7
+  k=15: caldp=347.4 v2=347.4 v3=261.3 greedy=139.4 learned=423.9 lstm_v1=473.5
+  k=20: caldp=553.0 v2=553.0 v3=462.1 greedy=173.4 learned=54.4  lstm_v1=479.2
+  k=30: caldp=648.7 v2=648.7 v3=511.1 greedy=254.9 learned=98.2  lstm_v1=505.4
+  k=40: caldp=648.7 v2=648.7 v3=511.1 greedy=392.0 learned=299.8 lstm_v1=530.9
+  NOTE: k=30=k=40 Cal-DP is REAL (plateau in polblogs graph at B=9-12, not a bug).
+  Rerun confirmed in 1.5 min (fresh calibration).
+
+**Dashboard (DONE):** PID 3049 not found (already dead) → dashboard cancelled.
+
+**Feature note fix (3c):**
+  Dims 10-12 and 16-18 show zeros because features are a snapshot at t=0
+  (dynamic features: time-in-market, pricing history, acceptance rate are all
+  inactive/zero at episode start). This is NOT "BA structural zeros" — the zeros
+  appear on ANY graph at t=0 and disappear after step 1.
+
+**Polblogs Cal-DP confirmed rerun:** results/logs/polblogs_budget_sweep.json updated.
+**Collapse diagnostic + Probe-1:** running PID 80353 → /tmp/collapse_probe1.log
+
+**Collapse Diagnostic (Step 2, unconstrained seed=42):**
+  Model              | mean_d | frac_d>0.9 | mean_price | acc_rate
+  IM-RL/polblogs     | 0.998  |   1.000    |   0.002    |  1.000  (COLLAPSED)
+  LSTM/polblogs      | 0.196  |   0.049    |   0.804    |  0.983  (HEALTHY)
+  LSTM/rice-fb       | 0.103  |   0.068    |   0.897    |  0.887  (HEALTHY)
+  Verdict: IM-RL collapsed (d≈1 always, gives away free); LSTM healthy on both OOD graphs.
+
+**Probe-1 Redo (Step 3a, unconstrained, BA n=600 m=10 seed=999, 3 seeds):**
+  Greedy: [230.3, 222.7, 230.3] mean=227.8
+  LSTM:   [314.9, 309.5, 316.1] mean=313.5
+  Ratio LSTM/Greedy = 1.376 → VALID (>1)
