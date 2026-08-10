@@ -1058,7 +1058,11 @@ ITEM 1 — BA skew stats (from /tmp/topology_arms.log):
   BA_n440_m8:  edges=3456 mean_deg=15.7 max/med=10.3
   BA_n440_m12: edges=5136 mean_deg=23.3 max/med=6.6
   Note: max/med=4-10 vs polblogs=27. BA at n≤440 cannot match polblogs skew (would need n≈23K). Hub structure PRESENT at reduced scale.
-  Note: zero_cols=[10,11,12,16,17,18] = betweenness-related features; not NaN/Inf; training safe.
+  Note: zero_cols=[10,11,12,16,17,18] = dynamic features (dims 11-16: n_adopted, influence, etc.)
+    and pricing features (dims 17-19) — all zero at t=0 BEFORE any offers; not BA-specific
+    structural zeros, not betweenness-related. Training safe; values populate during episode.
+    Feature saturation concern is the 5 STATIC hub-dominant dims (0-indexed 0,2,3,5,6)
+    showing 6-58x hub/median ratio on BA n=600 m=10 seed=999 proxy.
 
 TRAINING (PID=92040, /tmp/topology_arms.log):
   ARM A cache building: 10 graphs × 7 k × 20 seeds = 1400 BA trajectories
@@ -1083,3 +1087,62 @@ FIX: precompute caches once before training loop (commit 8cf9e22).
 Relaunched: PID=21381, /tmp/topology_arms.log, nohup python -u experiments/run_topology_arms.py
 Approx betweenness: k=100 pivots (monkey-patch at top of training script).
 Epoch 0 computing (expected ~2-5 min with fix). Monitor: grep "P1 ep" /tmp/topology_arms.log
+
+---
+
+## Session State (updated 2026-08-10 — Seed-matched re-verification + context-fresh run)
+
+EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.
+
+### Re-verification of seed-matched specialist numbers (2026-08-10)
+Seeds: [42, 123, 7] — source: results/logs/unified_sweep.json (key confirmed)
+Graph: FF n=1000, c=0.3, seed=0 (eval harness; edges=2345)
+Python: venv/bin/python (torch=2.8.0)
+Eval script: experiments/run_largek_eval.py → /tmp/largek_eval_matched.log
+Source JSON: results/logs/largek_specialist_eval.json
+
+NOTE on Greedy@k=40 mismatch: task spec says 448.7 (from dp_upgrade_eval.json, different graph).
+The eval harness uses graph seed=0 → Greedy+Budget k=40 = 451.78 (deterministic; confirmed
+stable across all runs). This is the canonical specialist-eval number. 451.78 is CORRECT.
+
+k-table (seed-matched means, from largek_specialist_eval.json):
+  k=15: frozen_unified=365.21  specialist=342.27  delta=-22.94  dp_comp=447.7
+  k=16: frozen_unified=N/A     specialist=351.14  delta=N/A     dp_comp=N/A
+  k=20: frozen_unified=369.58  specialist=404.24  delta=+34.66  dp_comp=448.0
+  k=25: frozen_unified=N/A     specialist=431.81  delta=N/A     dp_comp=448.0
+  k=30: frozen_unified=387.92  specialist=464.89  delta=+76.97  dp_comp=448.0
+  k=40: frozen_unified=407.00  specialist=473.06  delta=+66.07  greedy=451.78  dp_comp=448.0
+
+Per-seed specialist values (seeds 42, 123, 7):
+  k=20: [412.57, 383.73, 416.40]
+  k=30: [468.44, 465.56, 460.67]
+  k=40: [475.35, 475.65, 468.18]
+
+Accounting identity: OK — bankrupt_mean=0.0 all k, all seeds.
+Gate S re-check: PASS  k40=473.06>=435.0  k20=404.24>=384.6  k30=464.89>=402.9
+
+Deployment boundary: k=20
+  k<=19: use unified model (rev_gnn_lstm_unified.pt, sha1=a7b7081d)
+  k>=20: use large-k specialist (rev_gnn_lstm_largek.pt, sha256=3033620a...)
+  At k=15: unified=365.21 > specialist=342.27 → unified wins
+  At k=16: specialist=351.14 (no frozen unified at k=16 in sweep grid; classified unified regime)
+  At k=20: specialist=404.24 >> unified=369.58 (+34.66) → specialist wins
+  Boundary definition: first k on eval grid where specialist clearly exceeds unified = k=20.
+
+Task 2 boundary verdict: k=15 → unified wins; k=16 → unified wins (no grid pt for unified).
+  First k where specialist wins = k=20 (first grid point with a unified comparison).
+
+"407" grep in sections/:
+  paper/sections/results.tex:34 — correct usage: "$407.0$ at k=40" is the frozen-unified
+  reference number, used to motivate the specialist. The sentence is correct.
+  Old story: "gap between unified policy ($407.0$) and Cal-DP ($448.0$) is a training-range artifact"
+  New story (already in file): same sentence + specialist yields 473.1 at k=40 > Cal-DP + Greedy.
+
+Files changed (paper integration, already in commit ea73521):
+  paper/tables/paper_table_idea3_final.tex  — k=40 FF LSTM: 339.1→473.1±3.5 (bold); boundary k>=20 in caption
+  experiments/plot_idea3_main_v3.py         — NEW: hybrid line DEPLOYMENT_BOUNDARY=20
+  results/figures/fig_idea3_main_v2.pdf     — regenerated (prev backed up as _prev.pdf)
+  paper/sections/methodology.tex            — large-k specialist paragraph appended
+  paper/sections/results.tex               — "Large-k specialist and the slack regime" paragraph added
+
+EXPERIMENTS CLOSED 2026-08-12 — writing only until submission.
