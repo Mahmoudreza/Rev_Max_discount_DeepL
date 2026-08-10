@@ -810,8 +810,31 @@ k-table (all 8 k-values confirmed):
   Source: polblogs_budget_sweep.json results[k]["greedy_b"] — confirmed same-run values.
   Unconstrained Greedy-Discount (polblogs_eval.json protocol_a): 525.7
 
-**NEXT ACTION (single source of truth, 2026-08-10 11:00AM):**
-  1. Wait for topology-arms Arm A checkpoint (expected ~09:40AM Aug 11)
-  2. When checkpoint appears: run experiments/run_topology_arms_eval.py (5-seed, 5 networks)
-     → print Gate A + Gate B lines.
-  3. NOTHING ELSE. Do not touch training job.
+**NEXT ACTION (single source of truth, 2026-08-10 11:05AM):**
+  TRAINING PROGRESSING: ep 60/200 Phase 1 of Arm A (loss 2.2535, last log 07:52 Aug 10).
+  ep 80 expected ~11:08AM Aug 10. Checkpoint (rev_gnn_lstm_ba.pt) saved only at end of
+  Phase 1+Phase 2 — ETA ~09:40AM Aug 11.
+
+  WHEN rev_gnn_lstm_ba.pt APPEARS:
+    1. shasum -a 256 results/checkpoints/rev_gnn_lstm_ba.pt | cut -c1-8
+    2. Run experiments/run_topology_arms_eval.py (5-seed seeds 0..4, greedy eval):
+         networks: polblogs LCC, FF n=1000, Rice-FB  (+ Modular-FF + FF n=2000 optional)
+         reference rows from frozen JSONs (never rerun released models)
+         save → results/logs/topology_arms_eval.json
+    3. Print table: network | frozen LSTM | arm A (BA) | Greedy
+    4. Print EXACTLY:
+         GATE A: STRONG PASS  iff polblogs >= 530.4
+         GATE A: PARTIAL      iff polblogs >= 420.0
+         GATE A: FAIL         otherwise
+    5. CLAUDE.md + commit.
+
+  WHEN rev_gnn_lstm_densemix.pt APPEARS (may be later session):
+    Same eval for Arm B on ALL FIVE networks:
+    5. Print EXACTLY:
+         GATE B: STRONG PASS  iff polblogs>=530.4 AND FF_n1000>=440.0 AND Rice>=190.0
+         GATE B: PARTIAL      iff polblogs>=420.0 AND FF_n1000>=440.0 AND Rice>=190.0
+         GATE B: FAIL         otherwise (any floor violation = FAIL)
+    6. CLAUDE.md + commit.
+
+  HARD STOP 2026-08-16 EOD: if still mid-arm, eval latest SAVED checkpoints as-is.
+  DO NOT: re-verify specialist, touch polblogs JSONs, start any new experiment.
