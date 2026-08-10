@@ -787,4 +787,8 @@ k-table (all 8 k-values confirmed):
 **Probe-1 Redo (Step 3a, unconstrained, BA n=600 m=10 seed=999, 3 seeds):**
   Greedy: [230.3, 222.7, 230.3] mean=227.8
   LSTM:   [314.9, 309.5, 316.1] mean=313.5
-  Ratio LSTM/Greedy = 1.376 → VALID (>1)
+  Ratio LSTM/Greedy = 1.376 → INVALID as failure diagnostic
+  (LSTM ABOVE Greedy: BA-level hub skew does NOT reproduce polblogs failure;
+   failure mechanism requires more than BA-level skew — polblogs max_deg=351,
+   mean_deg=27 vs BA max_deg~138, max/med~10; proxy is invalid for this test.)
+  Implication: BA curriculum may not contain polblogs difficulty; Gate A PARTIAL/FAIL plausible.
