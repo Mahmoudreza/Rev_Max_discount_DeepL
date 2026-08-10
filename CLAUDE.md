@@ -792,3 +792,26 @@ k-table (all 8 k-values confirmed):
    failure mechanism requires more than BA-level skew — polblogs max_deg=351,
    mean_deg=27 vs BA max_deg~138, max/med~10; proxy is invalid for this test.)
   Implication: BA curriculum may not contain polblogs difficulty; Gate A PARTIAL/FAIL plausible.
+
+### Session 2026-08-10 (health-check session)
+
+**Topology-arms job health (10:38AM check):**
+  PID 21381 alive, CPU 918:25.75 (106% active)
+  Last log: [A] P1 ep 60: loss=2.2535 (timestamp 07:52 Aug 10)
+  Timing: 587 wall-min to reach ep60 → ~196 min/20-epoch block (~10 min/epoch)
+  Expected ep 80 log: ~11:07AM Aug 10 (NOT STALLED — ep80 not due yet at 10:40AM)
+  VERDICT: TRAINING PROGRESSING at ~10 min/epoch
+  Checkpoint: NOT saved yet — saves only at END of Arm A (Phase1+Phase2 together)
+  ETA Arm A checkpoint: ep60 + 140 more epochs × 10 min = ~23h from 10:40AM → ~09:40AM Aug 11
+  Gate eval: DEFERRED until rev_gnn_lstm_ba.pt exists.
+
+**Greedy+Budget column confirmed (polblogs_budget_sweep.json, %TODO closed):**
+  k=1:7.4  k=3:34.3  k=5:50.4  k=10:98.5  k=15:139.4  k=20:173.4  k=30:254.9  k=40:392.0
+  Source: polblogs_budget_sweep.json results[k]["greedy_b"] — confirmed same-run values.
+  Unconstrained Greedy-Discount (polblogs_eval.json protocol_a): 525.7
+
+**NEXT ACTION (single source of truth, 2026-08-10 11:00AM):**
+  1. Wait for topology-arms Arm A checkpoint (expected ~09:40AM Aug 11)
+  2. When checkpoint appears: run experiments/run_topology_arms_eval.py (5-seed, 5 networks)
+     → print Gate A + Gate B lines.
+  3. NOTHING ELSE. Do not touch training job.
