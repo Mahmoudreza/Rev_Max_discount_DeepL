@@ -15,7 +15,12 @@ from __future__ import annotations
 import hashlib, json, os, sys, time
 import numpy as np
 import torch
+import networkx as nx
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Approximate betweenness (k=200 pivots) to avoid O(n^3) on dense graphs
+_orig_bc = nx.betweenness_centrality
+nx.betweenness_centrality = lambda G, normalized=True, **kw: _orig_bc(
+    G, k=min(200, G.number_of_nodes()), normalized=normalized, **kw)
 
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
 from src.env.polblogs_loader import load_polblogs
@@ -30,6 +35,7 @@ LOG_DIR  = "results/logs"
 BA_CKPT  = os.path.join(CKPT_DIR, "rev_gnn_lstm_ba.pt")
 MIX_CKPT = os.path.join(CKPT_DIR, "rev_gnn_lstm_densemix.pt")
 C = 0.3; B_MAX = 12.0; K_EVAL = 50; SEEDS = list(range(5)); WEIGHT_HIGH = 2.0
+N_MC = 5  # MC samples for IC influence (5 consistent with polblogs scripts; sufficient for relative ranking)
 
 
 def _sha8(p): return hashlib.sha256(open(p,"rb").read()).hexdigest()[:8]
@@ -64,7 +70,7 @@ def _load_policy(ckpt, device):
 
 @torch.no_grad()
 def eval_episode(policy, G, cache, ei, k, seed, device):
-    cfg=BudgetEnvConfig(budget_B=k*C,production_cost=C,seed=seed,weight_high=WEIGHT_HIGH)
+    cfg=BudgetEnvConfig(budget_B=k*C,production_cost=C,seed=seed,weight_high=WEIGHT_HIGH,n_mc_samples=N_MC)
     env=BudgetRevenueEnv(G,cfg); env.reset()
     policy.reset_episode(device); rev=0.0
     for _ in range(G.number_of_nodes()):
@@ -102,7 +108,7 @@ def main():
     polblogs=load_polblogs()
     ff1000=generate_forest_fire(1000,0.37,0.32,seed=0)
     rice=load_rice_facebook()
-    modf=generate_modular_forest_fire(500,2,0.37,0.32,seed=0)  # Modular-FF ~500n
+    modf=generate_modular_forest_fire([250,250],0.37,0.32,0.05,seed=0)  # Modular-FF ~500n (2x250)
     ff2000=generate_forest_fire(2000,0.37,0.32,seed=1)
     networks={"polblogs":polblogs,"FF_1000":ff1000,"Rice_FB":rice,"Modular_FF":modf,"FF_2000":ff2000}
     print(f"  Networks: {', '.join(f'{k}(n={G.number_of_nodes()})' for k,G in networks.items())}")
