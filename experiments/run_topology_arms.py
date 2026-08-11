@@ -170,7 +170,7 @@ def _eval_one_episode(policy, G, cache, ei, k, seed, device):
         if done: break
     return rev
 
-def phase1(policy, trajs, device, label):
+def phase1(policy, trajs, device, label, out_ckpt=None):
     # Precompute caches ONCE for all unique graphs (avoids betweenness per epoch)
     print(f"[{label}] Phase 1: precomputing caches for {len(set(id(t[3]) for t in trajs))} unique graphs...")
     graph_cache={}
@@ -213,6 +213,10 @@ def phase1(policy, trajs, device, label):
                 policy.update_sequence_state(d_tgt, step["accepted"], step.get("price",0.0))
         if ep%20==0:
             print(f"  [{label}] P1 ep{ep:3d}: loss={total_loss/(n_steps+1e-9):.4f}")
+            # Periodic checkpoint every 20 epochs so eval can run on partial model
+            if out_ckpt:
+                torch.save(policy.state_dict(), out_ckpt)
+                print(f"  [{label}] periodic save → {out_ckpt} (ep{ep})")
     return policy
 
 # ── Phase 2: REINFORCE ────────────────────────────────────────────────────────
@@ -304,8 +308,8 @@ def run_arm(label, ba_graphs, ff_graphs, out_ckpt, device):
     print(f"[{label}] Total traj pool: {len(trajs)} (BA={len(ba_trajs)} FF={len(ff_trajs)})")
     # Warm-start policy
     policy=_load_warm_start(device)
-    # Phase 1
-    policy=phase1(policy, trajs, device, label)
+    # Phase 1 (periodic saves every 20 epochs to out_ckpt for early eval)
+    policy=phase1(policy, trajs, device, label, out_ckpt=out_ckpt)
     # Phase 2 training graphs
     train_graphs=ba_graphs if label=="A" else ba_graphs+ff_graphs
     policy=phase2(policy, train_graphs, device, label)
@@ -359,8 +363,13 @@ def main():
     ff_graphs=[generate_forest_fire(n,FF_P,FF_PB,seed=i*7) for i,n in enumerate(FF_SIZES)]
     for i,G in enumerate(ff_graphs):
         print(f"  FF_n{FF_SIZES[i]}: n={G.number_of_nodes()} edges={G.number_of_edges()}")
-    # ARM A: BA only
-    sha_a=run_arm("A", ba_graphs, [], os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt"), device)
+    arm_b_only = "--arm-b-only" in sys.argv
+    # ARM A: BA only (skip if --arm-b-only and ba.pt already exists)
+    if arm_b_only and os.path.exists(os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt")):
+        sha_a=_sha8(os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt"))
+        print(f"[skip] ARM A already done (sha8={sha_a}), jumping to ARM B")
+    else:
+        sha_a=run_arm("A", ba_graphs, [], os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt"), device)
     # ARM B: 50/50 BA+FF
     sha_b=run_arm("B", ba_graphs, ff_graphs, os.path.join(CKPT_DIR,"rev_gnn_lstm_densemix.pt"), device)
     # Summary
