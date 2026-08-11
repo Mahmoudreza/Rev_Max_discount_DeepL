@@ -132,6 +132,8 @@ def main():
             m=eval_network(policy, G, device, f"{ckpt_name}/{net_name}")
             arm_res[net_name]=m
         results[ckpt_name]={"sha8":sha,"means":arm_res}
+    # Frozen LSTM reference values (from frozen JSONs — never rerun)
+    frozen_ref={"polblogs":374.2,"FF_1000":448.6,"Rice_FB":214.1,"Modular_FF":414.4,"FF_2000":915.0}
     # Read frozen Greedy from polblogs_eval
     greedy_pb=530.38  # from frozen polblogs_eval.json
     # Table
@@ -139,7 +141,7 @@ def main():
     print(f"{'network':<14} | {'frozen_LSTM':>11} | {'arm_A_BA':>10} | {'arm_B_mix':>10} | {'Greedy':>8}")
     print(f"{'─'*72}")
     for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        fl=frozen_lstm if net=="polblogs" else "N/A"
+        fl=frozen_ref.get(net,"N/A")
         ra=results.get("arm_a",{}).get("means",{}).get(net,"—")
         rb=results.get("arm_b",{}).get("means",{}).get(net,"—")
         gr=greedy_pb if net=="polblogs" else "N/A"

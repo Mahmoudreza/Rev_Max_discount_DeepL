@@ -838,3 +838,32 @@ k-table (all 8 k-values confirmed):
 
   HARD STOP 2026-08-16 EOD: if still mid-arm, eval latest SAVED checkpoints as-is.
   DO NOT: re-verify specialist, touch polblogs JSONs, start any new experiment.
+
+### Session 2026-08-11 (Gate A session)
+
+**GATE A: STRONG PASS** — arm_a polblogs=577.5 (threshold 530.4) 2026-08-11 15:48–16:49
+  Checkpoint: rev_gnn_lstm_ba.pt sha8=32a9053a (saved Aug 11 14:56)
+  arm_a results (5-seed, k=50, N_MC=5, BudgetRevenueEnv):
+    polblogs:    577.5  [582.9, 565.3, 572.1, 564.4, 603.0]  STRONG >=530.4 ✓
+    FF_1000:     286.9  [311.2, 278.6, 267.6, 268.2, 308.7]
+    Rice_FB:     212.8  [214.2, 213.4, 200.7, 218.1, 217.5]
+    Modular_FF:  197.7  [196.3, 203.7, 197.6, 187.0, 203.9]
+    FF_2000:     204.0  [170.0, 240.2, 194.4, 147.5, 267.9]
+  Frozen LSTM reference (paper): polblogs=374.2, FF_1000=448.6, Rice=214.1, Modular=414.4, FF_2000=915.0
+  Eval JSON: results/logs/topology_arms_eval.json
+  Wall time: 3281s (~55 min)
+
+**Arm B status (2026-08-11 16:50):** PID 21381 at [B] P1 ep 0 loss=3.4030 (just started Phase 1)
+  CPU 2564 min. densemix.pt NOT saved. ETA ~33h from now → ~01:50AM Aug 13.
+
+**NEXT ACTION (single source of truth, 2026-08-11 16:50):**
+  WHEN rev_gnn_lstm_densemix.pt APPEARS:
+    1. Run: venv/bin/python -u experiments/run_topology_arms_eval.py > /tmp/gateB_eval.log 2>&1
+    2. Wait ~55 min (same as Gate A).
+    3. tail /tmp/gateB_eval.log for the GATE B line.
+    4. GATE B: STRONG iff polblogs>=530.4 AND FF_1000>=440.0 AND Rice>=190.0
+       GATE B: PARTIAL iff polblogs>=420.0 with same floors
+       GATE B: FAIL otherwise (any floor = auto FAIL)
+    5. CLAUDE.md + commit "topology arms gate B".
+  Table will show frozen_LSTM: polblogs=374.2, FF_1000=448.6, Rice=214.1, Modular=414.4, FF_2000=915.0
+  DO NOT re-verify specialist, do not touch polblogs JSONs, do not start new experiments.
