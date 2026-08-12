@@ -888,3 +888,63 @@ k-table (all 8 k-values confirmed):
   venv/bin/python -u experiments/run_topology_arms_eval.py --arm-b-only > /tmp/gateB_final_eval.log 2>&1
 
 **Accounting check scheduled:** PID 6036 running arm_b polblogs identity check — see /tmp/arm_b_check.log
+
+**Env-validate (2026-08-12 session):** COMPLETE → /tmp/env_validate.log
+  Frozen rev_gnn_lstm.pt (sha 8fbc4648), 5 seeds, unconstrained (BudgetRevenueEnv k=50 B=15 C=0.3):
+    FF_1000: got=324.6  ref=448.6  diff=-124.0  DRIFT
+    Rice_FB: got=171.8  ref=214.1  diff=-42.3   DRIFT
+  VERDICT: ENV DRIFT (FF=324.6 Rice=171.8)
+  NOTE: Likely source of discrepancy — frozen_ref values (448.6/214.1) were established from
+  arm_b (rev_gnn_lstm_densemix.pt, 21-dim budget-aware model, ep80=446.8/216.6), NOT from
+  rev_gnn_lstm.pt (Idea-1, 20-dim, no budget col). Idea-1 model runs in budget-constrained env
+  without budget training → lower revenue. Server-side GPU numbers (Gate A polblogs=577.5,
+  Gate B polblogs=662.9/FF=446.8/Rice=216.6) remain internally consistent and comparable
+  to each other; the frozen Idea-1 ref column is NOT the comparison baseline for arm evals.
+  Arm B training continues (PID 35104) as pre-committed.
+
+**Arm B resumed (2026-08-12 session):** PID 35104 (already running since 11:30AM).
+  Command: python -u experiments/run_topology_arms.py --arm-b-only --resume-ep 80
+  Status at 13:42: ep80 P1 loss=2.3368, 120 more epochs Phase 1, then Phase 2.
+
+---
+
+## STANDING INSTRUCTION — When Arm B Final Checkpoint Appears
+
+When `results/checkpoints/rev_gnn_lstm_densemix.pt` SHA changes from ep80 (00368482):
+
+**Step 1 — Eval final checkpoint (10/5-seed, --final flag):**
+```
+venv/bin/python -u experiments/run_topology_arms_eval.py --arm-b-only --final \
+  > /tmp/gateB_final_eval.log 2>&1
+tail -30 /tmp/gateB_final_eval.log
+```
+Networks: polblogs (10 seeds), FF_1000 (10 seeds), Rice_FB (10 seeds),
+          Modular_FF (5 seeds), FF_2000 (5 seeds).
+
+**Step 2 — Print table WITH frozen reference column:**
+
+| network    | frozen_ref | ep80   | final  |
+|------------|------------|--------|--------|
+| polblogs   |    374.2   | 662.9  | _new_  |
+| FF_1000    |    448.6   | 446.8  | _new_  |
+| Rice_FB    |    214.1   | 216.6  | _new_  |
+| Modular_FF |    414.4   | 221.2  | _new_  |
+| FF_2000    |    915.0   | 872.5  | _new_  |
+
+**Step 3 — Apply pre-committed checkpoint rule:**
+  USE FINAL if:  polblogs>=530.4 AND FF_1000>=440.0 AND Rice>=190.0
+  USE EP80  otherwise (any floor violation → ep80 wins by default)
+  State which checkpoint is chosen.
+
+**Step 4 — Additional required reporting:**
+  a) ep80 Modular-FF number = 221.2 (already recorded above — confirm from final JSON)
+  b) Accounting-identity check for chosen checkpoint's polblogs run:
+       python -u experiments/run_topology_arms_eval.py --arm-b-only --accounting-check \
+         > /tmp/accounting_check.log 2>&1
+     Report: max_error (must be < 1e-6) and double-offer count (must be 0).
+  c) Double-offer check: verify no node is offered twice in any polblogs episode.
+
+**Step 5 — Commit:**
+  git add CLAUDE.md results/logs/topology_arms_eval.json
+  git commit -m "topology arms gate B final: <VERDICT> (polblogs=X FF=Y Rice=Z)"
+  Print hash only.
