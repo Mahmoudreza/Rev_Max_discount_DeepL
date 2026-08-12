@@ -120,7 +120,9 @@ def main():
         frozen_lstm=pb_data.get("protocol_b",{}).get("lstm_mean",None)
     # Load arm policies
     results={}
-    for ckpt_name, ckpt_path in [("arm_a", BA_CKPT), ("arm_b", MIX_CKPT)]:
+    arm_b_only = "--arm-b-only" in sys.argv
+    eval_arms = [("arm_b", MIX_CKPT)] if arm_b_only else [("arm_a", BA_CKPT), ("arm_b", MIX_CKPT)]
+    for ckpt_name, ckpt_path in eval_arms:
         if not os.path.exists(ckpt_path):
             print(f"[eval] {ckpt_path} not found — skip {ckpt_name}")
             continue

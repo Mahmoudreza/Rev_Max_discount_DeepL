@@ -170,18 +170,19 @@ def _eval_one_episode(policy, G, cache, ei, k, seed, device):
         if done: break
     return rev
 
-def phase1(policy, trajs, device, label, out_ckpt=None):
+def phase1(policy, trajs, device, label, out_ckpt=None, start_ep=0):
     # Precompute caches ONCE for all unique graphs (avoids betweenness per epoch)
     print(f"[{label}] Phase 1: precomputing caches for {len(set(id(t[3]) for t in trajs))} unique graphs...")
     graph_cache={}
     for (gi,k,traj,G) in trajs:
         if id(G) not in graph_cache:
             graph_cache[id(G)]=(build_graph_feature_cache(G,compute_static_features(G)), _edge_index(G,device))
-    print(f"[{label}] Caches ready. Starting {PH1_EPOCHS} epochs (pool={len(trajs)} → {SUBSAMPLE}/epoch)")
+    remaining=PH1_EPOCHS-start_ep
+    print(f"[{label}] Caches ready. Starting {remaining} epochs from ep{start_ep} (pool={len(trajs)} → {SUBSAMPLE}/epoch)")
     opt=torch.optim.Adam(policy.parameters(),lr=3e-4)
     ce_fn=nn.CrossEntropyLoss()
     mse_fn=nn.MSELoss()
-    for ep in range(PH1_EPOCHS):
+    for ep in range(start_ep, PH1_EPOCHS):
         random.shuffle(trajs)
         batch=trajs[:SUBSAMPLE]
         total_loss=0.0; n_steps=0
@@ -288,7 +289,7 @@ def phase2(policy, train_graphs, device, label):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-def run_arm(label, ba_graphs, ff_graphs, out_ckpt, device):
+def run_arm(label, ba_graphs, ff_graphs, out_ckpt, device, resume_ep=0):
     t0=time.time()
     print(f"\n{'='*60}\nARM {label}: {len(ba_graphs)} BA + {len(ff_graphs)} FF graphs → {out_ckpt}\n{'='*60}")
     # Build trajectory caches
@@ -306,10 +307,16 @@ def run_arm(label, ba_graphs, ff_graphs, out_ckpt, device):
         trajs=ba_trajs[:half]+ff_trajs[:half]
     random.shuffle(trajs)
     print(f"[{label}] Total traj pool: {len(trajs)} (BA={len(ba_trajs)} FF={len(ff_trajs)})")
-    # Warm-start policy
-    policy=_load_warm_start(device)
+    # Warm-start or resume from existing checkpoint
+    if resume_ep > 0 and os.path.exists(out_ckpt):
+        print(f"[{label}] Resuming from {out_ckpt} (ep{resume_ep})")
+        policy=_build_policy().to(device)
+        sd=torch.load(out_ckpt,map_location=device,weights_only=True)
+        policy.load_state_dict(sd,strict=True)
+    else:
+        policy=_load_warm_start(device)
     # Phase 1 (periodic saves every 20 epochs to out_ckpt for early eval)
-    policy=phase1(policy, trajs, device, label, out_ckpt=out_ckpt)
+    policy=phase1(policy, trajs, device, label, out_ckpt=out_ckpt, start_ep=resume_ep)
     # Phase 2 training graphs
     train_graphs=ba_graphs if label=="A" else ba_graphs+ff_graphs
     policy=phase2(policy, train_graphs, device, label)
@@ -363,6 +370,12 @@ def main():
     ff_graphs=[generate_forest_fire(n,FF_P,FF_PB,seed=i*7) for i,n in enumerate(FF_SIZES)]
     for i,G in enumerate(ff_graphs):
         print(f"  FF_n{FF_SIZES[i]}: n={G.number_of_nodes()} edges={G.number_of_edges()}")
+    # Resume epoch (for --arm-b-only --resume-ep N): load densemix.pt weights instead of warm-start
+    _resume_ep = 0
+    if "--resume-ep" in sys.argv:
+        idx = sys.argv.index("--resume-ep")
+        _resume_ep = int(sys.argv[idx+1])
+        print(f"[resume] Will start Phase 1 from ep{_resume_ep}")
     arm_b_only = "--arm-b-only" in sys.argv
     # ARM A: BA only (skip if --arm-b-only and ba.pt already exists)
     if arm_b_only and os.path.exists(os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt")):
@@ -371,7 +384,7 @@ def main():
     else:
         sha_a=run_arm("A", ba_graphs, [], os.path.join(CKPT_DIR,"rev_gnn_lstm_ba.pt"), device)
     # ARM B: 50/50 BA+FF
-    sha_b=run_arm("B", ba_graphs, ff_graphs, os.path.join(CKPT_DIR,"rev_gnn_lstm_densemix.pt"), device)
+    sha_b=run_arm("B", ba_graphs, ff_graphs, os.path.join(CKPT_DIR,"rev_gnn_lstm_densemix.pt"), device, resume_ep=_resume_ep)
     # Summary
     elapsed=time.time()-t_start
     print(f"\n{'='*60}")
