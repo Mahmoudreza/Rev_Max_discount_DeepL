@@ -34,8 +34,14 @@ CKPT_DIR = "results/checkpoints"
 LOG_DIR  = "results/logs"
 BA_CKPT  = os.path.join(CKPT_DIR, "rev_gnn_lstm_ba.pt")
 MIX_CKPT = os.path.join(CKPT_DIR, "rev_gnn_lstm_densemix.pt")
-C = 0.3; B_MAX = 12.0; K_EVAL = 50; SEEDS = list(range(5)); WEIGHT_HIGH = 2.0
-N_MC = 5  # MC samples for IC influence (5 consistent with polblogs scripts; sufficient for relative ranking)
+C = 0.3; B_MAX = 12.0; K_EVAL = 50; WEIGHT_HIGH = 2.0
+N_MC = 5
+# Seed configs: standard=5 seeds, final=10/5 (primary/secondary)
+SEEDS_STD = list(range(5))
+SEEDS_FINAL_PRIMARY = list(range(10))   # polblogs, FF_1000, Rice_FB
+SEEDS_FINAL_SECONDARY = list(range(5))  # Modular_FF, FF_2000
+PRIMARY_NETS = {"polblogs", "FF_1000", "Rice_FB"}
+SEEDS = SEEDS_STD  # overridden to dict when --final
 
 
 def _sha8(p): return hashlib.sha256(open(p,"rb").read()).hexdigest()[:8]
@@ -87,12 +93,13 @@ def eval_episode(policy, G, cache, ei, k, seed, device):
         if done: break
     return rev
 
-def eval_network(policy, G, device, label=""):
+def eval_network(policy, G, device, label="", seeds=None):
+    if seeds is None: seeds=SEEDS
     cache=build_graph_feature_cache(G,compute_static_features(G))
     ei=_edge_index(G,device)
-    revs=[eval_episode(policy,G,cache,ei,K_EVAL,s,device) for s in SEEDS]
+    revs=[eval_episode(policy,G,cache,ei,K_EVAL,s,device) for s in seeds]
     m=float(np.mean(revs))
-    print(f"  {label}: {[f'{r:.1f}' for r in revs]} mean={m:.1f}")
+    print(f"  {label} ({len(seeds)} seeds): {[f'{r:.1f}' for r in revs]} mean={m:.1f}")
     return m
 
 def _gate_a(pb): return "STRONG" if pb>=530.4 else ("PARTIAL" if pb>=420.0 else "FAIL")
@@ -121,7 +128,10 @@ def main():
     # Load arm policies
     results={}
     arm_b_only = "--arm-b-only" in sys.argv
+    final_mode = "--final" in sys.argv  # 10 seeds primary, 5 secondary
     eval_arms = [("arm_b", MIX_CKPT)] if arm_b_only else [("arm_a", BA_CKPT), ("arm_b", MIX_CKPT)]
+    if final_mode:
+        print("[eval] FINAL MODE: 10 seeds (polblogs/FF_1000/Rice_FB) + 5 seeds (Modular_FF/FF_2000)")
     for ckpt_name, ckpt_path in eval_arms:
         if not os.path.exists(ckpt_path):
             print(f"[eval] {ckpt_path} not found — skip {ckpt_name}")
@@ -131,9 +141,13 @@ def main():
         policy=_load_policy(ckpt_path, device)
         arm_res={}
         for net_name, G in networks.items():
-            m=eval_network(policy, G, device, f"{ckpt_name}/{net_name}")
+            if final_mode:
+                seeds = SEEDS_FINAL_PRIMARY if net_name in PRIMARY_NETS else SEEDS_FINAL_SECONDARY
+            else:
+                seeds = SEEDS_STD
+            m=eval_network(policy, G, device, f"{ckpt_name}/{net_name}", seeds=seeds)
             arm_res[net_name]=m
-        results[ckpt_name]={"sha8":sha,"means":arm_res}
+        results[ckpt_name]={"sha8":sha,"means":arm_res,"final_mode":final_mode}
     # Frozen LSTM reference values (from frozen JSONs — never rerun)
     frozen_ref={"polblogs":374.2,"FF_1000":448.6,"Rice_FB":214.1,"Modular_FF":414.4,"FF_2000":915.0}
     # Read frozen Greedy from polblogs_eval
