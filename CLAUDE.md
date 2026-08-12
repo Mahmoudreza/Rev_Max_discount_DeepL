@@ -867,3 +867,24 @@ k-table (all 8 k-values confirmed):
     5. CLAUDE.md + commit "topology arms gate B".
   Table will show frozen_LSTM: polblogs=374.2, FF_1000=448.6, Rice=214.1, Modular=414.4, FF_2000=915.0
   DO NOT re-verify specialist, do not touch polblogs JSONs, do not start new experiments.
+
+### Session 2026-08-12 (Gate B early eval)
+
+**GATE B: STRONG PASS** — arm_b ep80 Phase1-only checkpoint 2026-08-12 11:29–13:01
+  Checkpoint: rev_gnn_lstm_densemix.pt sha8=00368482 (ep80, Phase 1 only)
+  arm_b results (5-seed, k=50, N_MC=5, BudgetRevenueEnv, --arm-b-only):
+    polblogs:    662.9  STRONG >=530.4 ✓
+    FF_1000:     446.8  STRONG >=440.0 ✓
+    Rice_FB:     216.6  STRONG >=190.0 ✓
+    Modular_FF:  221.2
+    FF_2000:     872.5
+  Frozen LSTM ref: polblogs=374.2, FF_1000=448.6, Rice=214.1, Modular=414.4, FF_2000=915.0
+  Eval JSON: results/logs/topology_arms_eval.json (4510s wall)
+  Note: ep80 = Phase 1 imitation only. Phase 2 REINFORCE expected to push higher.
+
+**Training status (2026-08-12 13:01):** PID 35104, caffeinate 35105, resuming ep80→200 Phase1 + 150 Phase2.
+
+**NEXT ACTION:** When Phase 2 completes (densemix.pt final SHA changes), run Gate B eval again for definitive numbers.
+  venv/bin/python -u experiments/run_topology_arms_eval.py --arm-b-only > /tmp/gateB_final_eval.log 2>&1
+
+**Accounting check scheduled:** PID 6036 running arm_b polblogs identity check — see /tmp/arm_b_check.log
