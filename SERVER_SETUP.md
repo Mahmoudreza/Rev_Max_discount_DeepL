@@ -29,20 +29,19 @@ source venv/bin/activate
 pip install --upgrade pip
 ```
 
-### 3a. Install PyTorch — CPU-only Linux (if no GPU)
+### 3a. Install PyTorch — CUDA 12.8 Linux (Blackwell / H100 / A100 server — RECOMMENDED)
+```bash
+pip install torch==2.8.0 torchvision==0.23.0 \
+    --index-url https://download.pytorch.org/whl/cu128
+```
+
+### 3b. Install PyTorch — CPU-only Linux (no GPU)
 ```bash
 pip install torch==2.8.0 torchvision==0.23.0 \
     --index-url https://download.pytorch.org/whl/cpu
 ```
-
-### 3b. Install PyTorch — CUDA 12.1 Linux (if server has NVIDIA GPU)
-```bash
-pip install torch==2.8.0 torchvision==0.23.0 \
-    --index-url https://download.pytorch.org/whl/cu121
-```
-> Note: Training script uses `torch.device("cpu")` by default.
-> If you want GPU training, change `device=torch.device("cpu")` to
-> `device=torch.device("cuda")` in `experiments/run_topology_arms.py`.
+> Note: Training script auto-detects GPU (`torch.cuda.is_available()`).
+> It will use GPU automatically if cu128 PyTorch is installed.
 
 ### 4. Install PyTorch Geometric
 ```bash
@@ -114,7 +113,7 @@ Expected output at each 20-epoch checkpoint:
 
 Training will save `densemix.pt` every 20 epochs during Phase 1 (ep80→199) and at the end of Phase 2.
 
-**Total runtime estimate:** ~22h for remaining 120 Phase1 + 150 Phase2 epochs on CPU.
+**Total runtime estimate:** ~22h on CPU; significantly faster on GPU (GNN ops benefit from CUDA).
 
 ---
 

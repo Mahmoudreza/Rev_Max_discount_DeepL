@@ -338,7 +338,8 @@ def run_arm(label, ba_graphs, ff_graphs, out_ckpt, device, resume_ep=0):
 
 def main():
     t_start=time.time()
-    device=torch.device("cpu")
+    device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Device: {device}")
     # Check base ckpt
     sha=_sha8(BASE_CKPT)
     print(f"Base checkpoint: {BASE_CKPT} sha8={sha}")
