@@ -18,14 +18,19 @@ import numpy as np
 
 EXPECTED_NETS = ["polblogs", "FF_1000", "Rice_FB", "Modular_FF", "FF_2000"]
 EXPECTED_KS   = [5, 10, 15, 20, 30, 40]
+EXPECTED_KS_BY_NET = {
+    "_default": [5, 10, 15, 20, 30, 40],
+}
 MERGED_OUT    = "results/logs/budget_sweep_all_networks.json"
 SHARD_GLOB    = "results/logs/budget_sweep_*.json"
 EXCLUDE       = {"budget_sweep_all_networks.json"}
+EXCLUDE_SUFFIX = "_old.json"  # skip legacy date-stamped shards
 
 
 def _load_shards():
     paths = [p for p in sorted(glob.glob(SHARD_GLOB))
-             if os.path.basename(p) not in EXCLUDE]
+             if os.path.basename(p) not in EXCLUDE
+             and not os.path.basename(p).endswith(EXCLUDE_SUFFIX)]
     if not paths:
         print("ERROR: no shard files found matching", SHARD_GLOB)
         sys.exit(1)
@@ -55,8 +60,11 @@ def _load_shards():
 def _assert_complete(merged):
     print("\nCompleteness check:", flush=True)
     missing = []
+    total = 0
     for net in EXPECTED_NETS:
-        for k in EXPECTED_KS:
+        net_ks = EXPECTED_KS_BY_NET.get(net, EXPECTED_KS_BY_NET["_default"])
+        total += len(net_ks)
+        for k in net_ks:
             if net not in merged or k not in merged[net]:
                 missing.append(f"({net}, k={k})")
     if missing:
@@ -65,7 +73,7 @@ def _assert_complete(merged):
         print("  ABORT: incomplete results — run missing shards first.", flush=True)
         sys.exit(1)
     else:
-        print(f"  All {len(EXPECTED_NETS)*len(EXPECTED_KS)} cells present. ✓", flush=True)
+        print(f"  All {total} cells present. ✓", flush=True)
 
 
 def _verify_parallel(merged, ref_ff1000_k40_ours, tol=1.0):
@@ -115,7 +123,8 @@ def main():
     out = {
         "protocol": proto,
         "shas": shas,
-        "results": {net: {str(k): merged[net][k] for k in EXPECTED_KS}
+        "results": {net: {str(k): merged[net][k]
+                          for k in EXPECTED_KS_BY_NET.get(net, EXPECTED_KS_BY_NET["_default"])}
                     for net in EXPECTED_NETS},
         "wall_s": total_wall,
         "merge_note": "merged from parallel shards",
