@@ -5,17 +5,16 @@ Methods (ALL in BudgetRevenueEnv, B=k*C, C=0.3):
   1. Greedy+Budget        — Babaei 2013 budget-aware
   2. Cal-DP composite     — max(v2, v3) per trial, fresh calibration per (network, k)
   3. OURS                 — deployment rule: unified(k<20) | largek(k>=20)
-  4. lstm_v1              — rev_gnn_lstm_budget.pt (per-network released alternative)
+  4. lstm_v1              — rev_gnn_lstm_budget.pt (a7828957)
   5. arm_a (unconstrained-trained) — rev_gnn_lstm_ba.pt, sha 32a9053a
   6. arm_b (unconstrained-trained) — rev_gnn_lstm_densemix.pt, sha 00368482, ep80
-
-Summary lines cover OURS only. Rows 5-6 reported but excluded from summary.
-Observation: networks/k where an unconstrained arm beats BOTH Greedy+Budget AND Cal-DP.
 
 Run on server:
     python -u experiments/eval_all_methods_ksweep.py 2>&1 | tee /tmp/all_methods_ksweep.log
 
-Output: results/logs/all_methods_ksweep.json
+Outputs:
+  results/logs/budget_sweep_all_networks.json
+  results/logs/network_topology_stats.json
 """
 from __future__ import annotations
 import hashlib, json, os, sys, time
@@ -46,24 +45,45 @@ C          = 0.3
 b_RAY      = 1.0
 W_HIGH     = 2.0
 N_MC       = 5
-N_TRIALS   = 3            # seeds 0,1,2 for all methods
+N_TRIALS   = 3
 SEEDS      = list(range(N_TRIALS))
-
-# OURS deployment rule: k<20 → unified, k>=20 → largek
-K_SWITCH   = 20
+K_SWITCH   = 20   # OURS: k<20 → unified, k>=20 → largek
 
 # ── Checkpoints ───────────────────────────────────────────────────────────────
 CKPT_DIR     = "results/checkpoints"
-OURS_SMALL   = os.path.join(CKPT_DIR, "rev_gnn_lstm_unified.pt")    # k < 20
-OURS_LARGE   = os.path.join(CKPT_DIR, "rev_gnn_lstm_largek.pt")     # k >= 20
-LSTM_V1_CKPT = os.path.join(CKPT_DIR, "rev_gnn_lstm_budget.pt")     # a7828957
-ARM_A_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_ba.pt")         # 32a9053a
-ARM_B_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_densemix.pt")   # 00368482
+OURS_SMALL   = os.path.join(CKPT_DIR, "rev_gnn_lstm_unified.pt")
+OURS_LARGE   = os.path.join(CKPT_DIR, "rev_gnn_lstm_largek.pt")
+LSTM_V1_CKPT = os.path.join(CKPT_DIR, "rev_gnn_lstm_budget.pt")
+ARM_A_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_ba.pt")
+ARM_B_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_densemix.pt")
 
-LOG_OUT = "results/logs/all_methods_ksweep.json"
+LOG_OUT   = "results/logs/budget_sweep_all_networks.json"
+TOPO_OUT  = "results/logs/network_topology_stats.json"
+
+# Expected SHAs (fail fast if wrong checkpoint loaded)
+EXPECTED_SHAS = {
+    OURS_SMALL:   "00071438",
+    OURS_LARGE:   "3033620a",
+    LSTM_V1_CKPT: "a7828957",
+}
 
 
 def _sha8(p): return hashlib.sha256(open(p,"rb").read()).hexdigest()[:8]
+
+def _verify_shas():
+    ok = True
+    for ckpt, expected in EXPECTED_SHAS.items():
+        actual = _sha8(ckpt) if os.path.exists(ckpt) else "MISSING"
+        match = actual == expected
+        print(f"  SHA {'OK' if match else 'MISMATCH'}: {os.path.basename(ckpt)} "
+              f"actual={actual} expected={expected}", flush=True)
+        if not match:
+            ok = False
+    # Arms: print sha but don't enforce (ep80 known)
+    for label, ckpt in [("arm_a", ARM_A_CKPT), ("arm_b", ARM_B_CKPT)]:
+        sha = _sha8(ckpt) if os.path.exists(ckpt) else "MISSING"
+        print(f"  SHA INFO: {label} sha8={sha}", flush=True)
+    return ok
 
 def _edge_index(G, device):
     edges = list(G.edges())
@@ -89,12 +109,10 @@ def _avail(env, n, device):
     return m
 
 def _feat_budget(cache, env, k):
-    # OURS/lstm_v1 trained with k=n_val for round_ratio (matches run_largek_eval.py)
     return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=cache["n"], env=env)
 
-_ARM_K = 50   # arm_a/arm_b trained at fixed K=50 — keep for round_ratio consistency with training
+_ARM_K = 50
 def _feat_unconstrained(cache, env, k):
-    # arms: run_topology_arms.py trained with k=K=50; budget_col frozen at 1.0
     base = compute_node_features_fast(cache, env.S, env.offered, env.t, _ARM_K, env)
     return np.concatenate([base, np.ones((cache["n"],1), dtype=np.float32)], axis=1)
 
@@ -103,14 +121,20 @@ def eval_policy_episode(policy, G, cache, ei, k, B, seed, device, feat_fn, skip_
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed,
                          weight_high=W_HIGH, n_mc_samples=N_MC)
     env = BudgetRevenueEnv(G, cfg); env.reset()
+    B0 = env.B
     n = G.number_of_nodes()
-    policy.reset_episode(device); rev = 0.0
+    policy.reset_episode(device)
+    rev = 0.0; step_revs = []; n_accepted = 0; offers = set()
     while env.available_nodes and not env._check_bankrupt():
         x  = torch.FloatTensor(feat_fn(cache, env, k)).to(device)
         av = _avail(env, n, device)
         if not av.any(): break
         sc, h, ctx, _ = policy.forward(x, ei, av)
         ni = int(sc.argmax().item())
+        node_id = env.nodes[ni]
+        # Double-offer check
+        assert node_id not in offers, f"DOUBLE-OFFER node={node_id}"
+        offers.add(node_id)
         d  = float(policy.get_discount_distribution(torch.cat([h[ni],ctx])).mean.item())
         if skip_enforce:
             ev = env._estimate_valuation(env.nodes[ni])
@@ -120,17 +144,27 @@ def eval_policy_episode(policy, G, cache, ei, k, B, seed, device, feat_fn, skip_
                 env.budget_history.append(env.B)
                 policy.update_sequence_state(d, False, 0.0)
                 continue
+        B_before = env.B
         _, _, done, info = env.step(ni, d)
-        if info["accepted"]: rev += info["offered_price"]
+        if info["accepted"]:
+            step_rev = info["offered_price"]
+            rev += step_rev
+            step_revs.append(step_rev)
+            n_accepted += 1
         policy.update_sequence_state(d, info["accepted"], info.get("revenue_step",0.0))
         if done: break
-    return rev
+    # Accounting identity: B_final = B0 + sum(revenue) - n_accepted*C
+    B_final = env.B
+    acct_expected = B0 + sum(step_revs) - n_accepted * C
+    acct_err = abs(B_final - acct_expected)
+    return rev, acct_err
 
 def eval_policy_k(policy, G, cache, ei, k, B, device, feat_fn, skip_enforce=False):
-    return float(np.mean([
-        eval_policy_episode(policy, G, cache, ei, k, B, s, device, feat_fn, skip_enforce)
-        for s in SEEDS
-    ]))
+    revs, errs = [], []
+    for s in SEEDS:
+        r, e = eval_policy_episode(policy, G, cache, ei, k, B, s, device, feat_fn, skip_enforce)
+        revs.append(r); errs.append(e)
+    return float(np.mean(revs)), float(max(errs))
 
 def eval_greedy_k(G, k, B):
     res = greedy_discount_budget(G, B=B, c=C, b=b_RAY, n_trials=N_TRIALS, weight_high=W_HIGH)
@@ -143,20 +177,39 @@ def eval_caldp_k(G, k, B):
     r3 = dp_calibrated_v3_budget(G, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=20)
     v2 = r2["revenue"]["all"] if isinstance(r2["revenue"], dict) else [r2["revenue"]]
     v3 = r3["revenue"]["all"] if isinstance(r3["revenue"], dict) else [r3["revenue"]]
-    composite = [max(a, b) for a, b in zip(v2, v3)]
-    return float(np.mean(composite))
+    return float(np.mean([max(a, b) for a, b in zip(v2, v3)]))
+
+def compute_topo_stats(G, name):
+    degs = [d for _, d in G.degree()]
+    cc = nx.average_clustering(G)
+    try:
+        comms = nx.community.greedy_modularity_communities(G)
+        mod = nx.community.modularity(G, comms)
+    except Exception:
+        mod = None
+    return {
+        "n": G.number_of_nodes(), "m": G.number_of_edges(),
+        "mean_deg": round(float(np.mean(degs)), 2),
+        "median_deg": int(np.median(degs)),
+        "max_deg": int(np.max(degs)),
+        "max_median_ratio": round(float(np.max(degs)/max(1,np.median(degs))), 2),
+        "avg_clustering": round(cc, 4),
+        "modularity": round(mod, 4) if mod is not None else None,
+    }
 
 
 def main():
     t_start = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[ksweep] k={K_VALUES}  C={C}  N_TRIALS={N_TRIALS}  device={device}")
-    for label, ckpt in [("OURS_SMALL", OURS_SMALL), ("OURS_LARGE", OURS_LARGE),
-                        ("lstm_v1", LSTM_V1_CKPT), ("arm_a", ARM_A_CKPT), ("arm_b", ARM_B_CKPT)]:
-        sha = _sha8(ckpt) if os.path.exists(ckpt) else "MISSING"
-        print(f"  {label}: sha8={sha}", flush=True)
+    print(f"[ksweep] k={K_VALUES}  C={C}  N_TRIALS={N_TRIALS}  device={device}", flush=True)
 
-    # Load networks once
+    # SHA verification
+    print("\n[ksweep] Verifying checkpoint SHAs...", flush=True)
+    if not _verify_shas():
+        print("ABORT: checkpoint SHA mismatch — fix before running.", flush=True)
+        sys.exit(1)
+
+    # Load networks
     print("\n[ksweep] Loading networks...", flush=True)
     networks = {
         "polblogs":   load_polblogs(),
@@ -166,28 +219,37 @@ def main():
         "FF_2000":    generate_forest_fire(2000, 0.37, 0.32, seed=1),
     }
 
-    # Pre-compute static features + edge index once per network
+    # Topology stats
+    print("\n[ksweep] Computing topology stats...", flush=True)
+    topo = {}
+    for name, G in networks.items():
+        topo[name] = compute_topo_stats(G, name)
+        t = topo[name]
+        print(f"  {name}: n={t['n']} m={t['m']} mean_deg={t['mean_deg']} "
+              f"max={t['max_deg']} clust={t['avg_clustering']} mod={t['modularity']}", flush=True)
+    os.makedirs("results/logs", exist_ok=True)
+    with open(TOPO_OUT, "w") as f: json.dump(topo, f, indent=2)
+    print(f"  Saved → {TOPO_OUT}", flush=True)
+
+    # Features + edge index
     caches, eis = {}, {}
     for name, G in networks.items():
-        print(f"  {name}: computing features...", flush=True)
         caches[name] = build_graph_feature_cache(G, compute_static_features(G))
         eis[name]    = _edge_index(G, device)
-        print(f"    n={G.number_of_nodes()} edges={G.number_of_edges()}", flush=True)
 
     # Load policies
     print("\n[ksweep] Loading policies...", flush=True)
-    pol_small  = _load_policy(OURS_SMALL, device)    # OURS k<20
-    pol_large  = _load_policy(OURS_LARGE, device)    # OURS k>=20
+    pol_small  = _load_policy(OURS_SMALL, device)
+    pol_large  = _load_policy(OURS_LARGE, device)
     pol_lstmv1 = _load_policy(LSTM_V1_CKPT, device)
     pol_arma   = _load_policy(ARM_A_CKPT, device)
     pol_armb   = _load_policy(ARM_B_CKPT, device)
 
     # Main sweep
-    all_results = {}   # [net_name][k] = {method: value}
+    all_results = {}
     for net_name, G in networks.items():
         all_results[net_name] = {}
-        cache = caches[net_name]
-        ei    = eis[net_name]
+        cache = caches[net_name]; ei = eis[net_name]
 
         for k in K_VALUES:
             B = k * C
@@ -195,80 +257,81 @@ def main():
             print(f"\n[ksweep] {net_name}  k={k}  B={B:.1f}", flush=True)
             r = {}
 
-            # Select OURS policy
-            ours_pol  = pol_small if k < K_SWITCH else pol_large
-            ours_label = f"unified(k<{K_SWITCH})" if k < K_SWITCH else f"largek(k>={K_SWITCH})"
-
+            ours_pol = pol_small if k < K_SWITCH else pol_large
             r["greedy_budget"]   = eval_greedy_k(G, k, B)
             print(f"  Greedy+Budget={r['greedy_budget']:.1f}", flush=True)
 
             r["caldp_composite"] = eval_caldp_k(G, k, B)
             print(f"  Cal-DP composite={r['caldp_composite']:.1f}", flush=True)
 
-            r["ours"]   = eval_policy_k(ours_pol, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
-            print(f"  OURS({ours_label})={r['ours']:.1f}", flush=True)
+            r["ours"], r["ours_acct_err"] = eval_policy_k(ours_pol, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
+            print(f"  OURS={r['ours']:.1f}  acct_err={r['ours_acct_err']:.2e}", flush=True)
 
-            r["lstm_v1"] = eval_policy_k(pol_lstmv1, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
-            print(f"  lstm_v1={r['lstm_v1']:.1f}", flush=True)
+            r["lstm_v1"], r["lstm_v1_acct_err"] = eval_policy_k(pol_lstmv1, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
+            print(f"  lstm_v1={r['lstm_v1']:.1f}  acct_err={r['lstm_v1_acct_err']:.2e}", flush=True)
 
-            r["arm_a"] = eval_policy_k(pol_arma, G, cache, ei, k, B, device, _feat_unconstrained)
-            print(f"  arm_a(unc)={r['arm_a']:.1f}", flush=True)
+            r["arm_a"], r["arm_a_acct_err"] = eval_policy_k(pol_arma, G, cache, ei, k, B, device, _feat_unconstrained)
+            print(f"  arm_a={r['arm_a']:.1f}  acct_err={r['arm_a_acct_err']:.2e}", flush=True)
 
-            r["arm_b"] = eval_policy_k(pol_armb, G, cache, ei, k, B, device, _feat_unconstrained)
-            print(f"  arm_b(unc)={r['arm_b']:.1f}  ({time.time()-t_k:.0f}s)", flush=True)
+            r["arm_b"], r["arm_b_acct_err"] = eval_policy_k(pol_armb, G, cache, ei, k, B, device, _feat_unconstrained)
+            print(f"  arm_b={r['arm_b']:.1f}  acct_err={r['arm_b_acct_err']:.2e}  ({time.time()-t_k:.0f}s)", flush=True)
 
             all_results[net_name][k] = r
 
-    # Print per-network tables
     wall = time.time() - t_start
+
+    # ── Print tables ─────────────────────────────────────────────────────────
+    METHODS = ["greedy_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b"]
+    MLABELS = ["Greedy+B","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)"]
     for net_name in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
         print(f"\n── {net_name} ──")
-        print(f"{'k':>4} | {'B':>5} | {'Greedy+B':>8} | {'Cal-DP':>8} | {'OURS':>8} | "
-              f"{'lstm_v1':>8} | {'arm_a(unc)':>10} | {'arm_b(unc)':>10}")
-        print(f"{'─'*85}")
-        for k in K_VALUES:
-            B = k * C
-            r = all_results[net_name][k]
-            print(f"{k:>4} | {B:>5.1f} | {r['greedy_budget']:>8.1f} | {r['caldp_composite']:>8.1f} | "
-                  f"{r['ours']:>8.1f} | {r['lstm_v1']:>8.1f} | "
-                  f"{r['arm_a']:>10.1f} | {r['arm_b']:>10.1f}")
+        print(f"{'method':<14}", end="")
+        for k in K_VALUES: print(f"  k={k:2d}", end="")
+        print()
+        print("─"*60)
+        for m, ml in zip(METHODS, MLABELS):
+            print(f"{ml:<14}", end="")
+            for k in K_VALUES:
+                print(f"  {all_results[net_name][k][m]:>5.0f}", end="")
+            print()
 
-    # Summary: OURS vs baselines
-    print(f"\n\nSUMMARY — OURS vs Baselines (deployment rule: unified k<{K_SWITCH}, largek k>={K_SWITCH}):")
-    for net_name in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        print(f"\n  {net_name}:")
+    # ── Summary lines ────────────────────────────────────────────────────────
+    print("\n\nSUMMARY LINES:")
+    print("(a) Networks where OURS >= Greedy+Budget at EVERY k:")
+    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
+        if all(all_results[net][k]["ours"] >= all_results[net][k]["greedy_budget"] for k in K_VALUES):
+            print(f"    {net}")
+    print("(b) Networks where OURS >= Cal-DP composite at EVERY k:")
+    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
+        if all(all_results[net][k]["ours"] >= all_results[net][k]["caldp_composite"] for k in K_VALUES):
+            print(f"    {net}")
+    print("(c) (network,k) where arm_a OR arm_b beats BOTH Greedy+Budget AND Cal-DP:")
+    found_c = False
+    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
         for k in K_VALUES:
-            r = all_results[net_name][k]
-            vg = r["ours"] - r["greedy_budget"]
-            vd = r["ours"] - r["caldp_composite"]
-            print(f"    k={k:2d}: OURS={r['ours']:.1f}  vs_Greedy={vg:+.1f}  vs_CalDP={vd:+.1f}")
-
-    # Observation: unconstrained arms beating BOTH baselines
-    print(f"\n\nOBSERVATION — (network, k) where unconstrained arm beats BOTH Greedy+Budget AND Cal-DP:")
-    found = False
-    for net_name in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        for k in K_VALUES:
-            r = all_results[net_name][k]
-            for arm_lbl, arm_val in [("arm_a", r["arm_a"]), ("arm_b", r["arm_b"])]:
+            r = all_results[net][k]
+            for arm_lbl, arm_val in [("arm_a",r["arm_a"]),("arm_b",r["arm_b"])]:
                 if arm_val > r["greedy_budget"] and arm_val > r["caldp_composite"]:
-                    print(f"  {net_name} k={k} {arm_lbl}: {arm_val:.1f} "
-                          f"> Greedy {r['greedy_budget']:.1f} AND > CalDP {r['caldp_composite']:.1f}")
-                    found = True
-    if not found:
-        print("  None — no (network, k) pair where an unconstrained arm beats both baselines.")
+                    print(f"    {net} k={k} {arm_lbl}: {arm_val:.1f} > G={r['greedy_budget']:.1f} & D={r['caldp_composite']:.1f}")
+                    found_c = True
+    if not found_c: print("    None")
+    print("(d) polblogs — OURS(unified,k<20) vs lstm_v1 at k=5,10,15:")
+    for k in [5,10,15]:
+        r = all_results["polblogs"][k]
+        print(f"    k={k}: OURS={r['ours']:.1f}  lstm_v1={r['lstm_v1']:.1f}  delta={r['ours']-r['lstm_v1']:+.1f}")
 
     print(f"\nWall time: {wall:.0f}s  ({wall/60:.1f} min)")
 
-    # Save
-    os.makedirs("results/logs", exist_ok=True)
+    # ── Save results ─────────────────────────────────────────────────────────
     out = {
         "protocol": {"k_values": K_VALUES, "C": C, "n_trials": N_TRIALS,
-                     "weight_high": W_HIGH, "deployment_rule": f"unified k<{K_SWITCH}, largek k>={K_SWITCH}"},
+                     "seeds": SEEDS, "weight_high": W_HIGH,
+                     "deployment_rule": f"unified k<{K_SWITCH}, largek k>={K_SWITCH}"},
+        "shas": {os.path.basename(k): v for k, v in EXPECTED_SHAS.items()},
         "results": all_results,
         "wall_s": wall,
     }
-    with open(LOG_OUT, "w") as f:
-        json.dump(out, f, indent=2)
+    with open(LOG_OUT, "w") as f: json.dump(out, f, indent=2)
     print(f"Saved → {LOG_OUT}")
 
 
