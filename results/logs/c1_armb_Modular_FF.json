@@ -1,0 +1,49 @@
+{
+  "net": "Modular_FF",
+  "arm_b_sha": "0b549f93",
+  "mc": 5,
+  "k0": {
+    "protoA": {
+      "rev_mean": 106.37,
+      "rev_all": [
+        106.37
+      ],
+      "mean_disc": 0.446,
+      "frac_d09": 0.0
+    },
+    "protoB": {
+      "rev_mean": 106.57,
+      "rev_all": [
+        105.67,
+        107.2,
+        106.06,
+        105.66,
+        108.24
+      ],
+      "mean_disc": 0.4487,
+      "frac_d09": 0.0
+    }
+  },
+  "k50": {
+    "protoA": {
+      "rev_mean": 151.9,
+      "rev_all": [
+        151.9
+      ],
+      "mean_disc": 0.0225,
+      "frac_d09": 0.0
+    },
+    "protoB": {
+      "rev_mean": 133.03,
+      "rev_all": [
+        139.85,
+        137.2,
+        126.37,
+        114.65,
+        147.09
+      ],
+      "mean_disc": 0.0231,
+      "frac_d09": 0.0
+    }
+  }
+}
