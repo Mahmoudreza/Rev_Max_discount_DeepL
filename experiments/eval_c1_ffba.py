@@ -63,14 +63,9 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import compute_static_features, build_graph_feature_cache, compute_node_features_fast
 from src.evaluation.baselines import ie_strategy, greedy_discount
 
-# ── Patch: fast neighbour-ratio influence (avoids MC IC per step) ──────────────
-def _fast_gci(self, node):
-    nb = list(self.graph.neighbors(node))
-    if not nb: return 0.
-    tw = sum(self._link_weights.get((node,n),0.) for n in nb)
-    if tw == 0: return 0.
-    return sum(self._link_weights.get((node,n),0.) for n in nb if n in self.S)/tw
-RevenueEnv.get_current_influence = _fast_gci
+# NOTE: do NOT monkey-patch get_current_influence.
+# The neighbour-ratio patch inflates valuation estimates → all buyers reject → revenue=0.
+# RevenueEnv uses its own IC-based estimate; we let it run as-is.
 
 # ── Protocol ───────────────────────────────────────────────────────────────────
 W_HIGH   = 2.0
@@ -121,6 +116,17 @@ def _cfg(seed=0):
                            project=prj, reward=rwd,
                            graph=SimpleNamespace(p=0.37, pb=0.32, n_nodes=500))
 
+def _load_policy_21(ckpt_path, device):
+    """Load released_lstm with in_dim=21 (budget-trained reference)."""
+    enc  = GraphSAGEEncoder(in_dim=21, hidden_dim=64, n_layers=2)
+    lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
+    pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
+    sd   = torch.load(ckpt_path, map_location=device, weights_only=True)
+    if "policy_state_dict" in sd: sd = sd["policy_state_dict"]
+    elif "model_state_dict" in sd: sd = sd["model_state_dict"]
+    pol.load_state_dict(sd, strict=True)
+    return pol.to(device).eval()
+
 def _load_policy(ckpt_path, device):
     """Load any in_dim=20 C1 policy (strict=True)."""
     enc  = GraphSAGEEncoder(in_dim=20, hidden_dim=64, n_layers=2)
@@ -139,42 +145,50 @@ def _edge_index(G, device):
     d    = [nmap[v] for _,v in E]+[nmap[u] for u,_ in E]
     return torch.tensor([s,d], dtype=torch.long, device=device)
 
+_REL_LSTM_K = 50  # feature k for released_lstm (trained unconstrained with k=50)
+
 @torch.no_grad()
-def eval_policy_episode(policy, G, cache, ei, seed, device):
-    """One episode in RevenueEnv (unconstrained). Returns (revenue, discounts)."""
+def eval_policy_episode(policy, G, cache, ei, seed, device, feat_k=0, in_dim=20):
+    """One episode in RevenueEnv (unconstrained). Returns (revenue, discounts).
+
+    feat_k: k passed to compute_node_features_fast (0 for C1 arms; 50 for released_lstm).
+    in_dim: 20 for C1 arms, 21 for released_lstm (extra dummy budget col appended here).
+    """
     env_cfg = RevenueEnvConfig(influence_model="monotone", b=B_RAY,
                                weight_low=0., weight_high=W_HIGH,
                                n_mc_samples=N_MC, reward_type="flat",
                                gamma=1.0, seed=seed)
     env = RevenueEnv(G, env_cfg); env.reset()
-    nodes = list(G.nodes()); n = len(nodes)
+    n = G.number_of_nodes()
     policy.reset_episode(device)
-    rev = 0.0; discounts = []
-    offered_set = set()
+    discounts = []
+
     for _ in range(n):
-        av = torch.tensor([v not in env.offered for v in nodes],
-                           dtype=torch.bool, device=device)
-        if not av.any(): break
+        av_mask = [i for i, node in enumerate(env.nodes) if node not in env.offered]
+        if not av_mask: break
+        av = torch.zeros(n, dtype=torch.bool, device=device)
+        for i in av_mask: av[i] = True
+
         feats = compute_node_features_fast(cache, env.S, frozenset(env.offered),
-                                           env.t, k=0, env=env)
+                                           env.t, k=feat_k, env=env)
+        if in_dim == 21:
+            feats = np.concatenate([feats, np.ones((n,1), dtype=np.float32)], axis=1)
         x  = torch.FloatTensor(feats).to(device)
         ms, h, ctx, _ = policy.forward(x, ei, av)
         ni = int(ms.argmax().item())
-        assert nodes[ni] not in offered_set, f"double-offer node={nodes[ni]}"
-        offered_set.add(nodes[ni])
+
         d  = float(policy.get_discount_distribution(
                         torch.cat([h[ni], ctx])).mean.item())
         discounts.append(d)
-        _, step_rev, done, info = env.step(ni, d)
-        rev += info.get("revenue", 0.0)
-        if done: break
-    return rev, discounts
+        env.step(ni, d)   # env tracks total_revenue internally
 
-def eval_policy(policy, G, cache, ei, seeds, device):
+    return float(env.total_revenue), discounts
+
+def eval_policy(policy, G, cache, ei, seeds, device, feat_k=0, in_dim=20):
     """Multi-seed eval; returns mean_rev, mean_disc, frac_d_gt_09."""
     all_revs = []; all_discs = []
     for s in seeds:
-        r, ds = eval_policy_episode(policy, G, cache, ei, s, device)
+        r, ds = eval_policy_episode(policy, G, cache, ei, s, device, feat_k, in_dim)
         all_revs.append(r); all_discs.extend(ds)
     d_arr = np.array(all_discs, dtype=float)
     return {
@@ -281,7 +295,9 @@ def main():
         print(f"  {key}: {fname}  sha={actual_sha}  "
               f"{'OK' if sha_ok else 'MISMATCH vs '+expected_sha}", flush=True)
         try:
-            loaded[key] = _load_policy(path, device)
+            # released_lstm was trained with in_dim=21 (budget features)
+            loader = _load_policy_21 if key == "released_lstm" else _load_policy
+            loaded[key] = loader(path, device)
         except Exception as e:
             print(f"  LOAD ERROR {key}: {e}", flush=True)
 
@@ -308,8 +324,10 @@ def main():
         # Neural models
         for key, pol in loaded.items():
             t_m = time.time()
-            r5  = eval_policy(pol, G, cache, ei, SEEDS_5,  device)
-            r42 = eval_policy(pol, G, cache, ei, SEED_42, device)
+            fk   = _REL_LSTM_K if key == "released_lstm" else 0
+            idim = 21 if key == "released_lstm" else 20
+            r5  = eval_policy(pol, G, cache, ei, SEEDS_5,  device, fk, idim)
+            r42 = eval_policy(pol, G, cache, ei, SEED_42, device, fk, idim)
             r[key] = {"5seed": r5, "seed42": r42, "phase": MODELS[key][2]}
             print(f"  {key}: 5s={r5['mean']:.1f}  s42={r42['mean']:.1f}  "
                   f"disc={r5['mean_disc']:.3f}  d>0.9={r5['frac_d_gt09']:.3f}  "
