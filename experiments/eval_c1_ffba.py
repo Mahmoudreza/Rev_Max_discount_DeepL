@@ -25,10 +25,12 @@ Baselines (RevenueEnv, same seeds):
 Frozen reference (paper, BudgetRevenueEnv k=50; shown for context only):
   FF_1000=448.6, FF_2000=915.0, Modular_FF=414.4, Rice_FB=214.1, polblogs=374.2
 
-Per-arm verdict (5-seed mean vs frozen_ref):
-  FIX CONFIRMED  if beats frozen_ref on ≥4/5 networks
-  TRADE-OFF      if beats on 2-3/5 networks
-  NO FIX         if beats on <2/5 networks
+Per-arm verdict (pre-registered, 5-seed mean):
+  FIX CONFIRMED : polblogs>=525.7 AND FF_1000>=440 AND FF_2000>=900
+                  AND Modular_FF>=400 AND Rice_FB>=200
+  TRADE-OFF     : polblogs>=525.7 but one or more other floors missed
+                  (printed with name + shortfall)
+  NO FIX        : polblogs<525.7
 
 Usage:
   python -u experiments/eval_c1_ffba.py [--networks NET ...] [--arm-tag TAG]
@@ -198,17 +200,37 @@ def eval_ie(G, seeds):
         revs.append(float(ie_strategy(G, cfg)))
     return {"mean": round(float(np.mean(revs)),2), "per_seed": [round(v,2) for v in revs]}
 
-def verdict(arm_results_5seed, net_names):
+# Pre-registered floors
+FLOORS = {
+    "polblogs":   525.7,
+    "FF_1000":    440.0,
+    "FF_2000":    900.0,
+    "Modular_FF": 400.0,
+    "Rice_FB":    200.0,
+}
+
+def verdict(arm_5seed_means):
     """
-    FIX CONFIRMED  if arm beats frozen_ref on >=4/5 networks
-    TRADE-OFF      if beats on 2-3/5 networks
-    NO FIX         if beats on <2/5 networks
+    FIX CONFIRMED : polblogs>=525.7 AND FF_1000>=440 AND FF_2000>=900
+                    AND Modular_FF>=400 AND Rice_FB>=200
+    TRADE-OFF     : polblogs>=525.7 but >=1 other floor missed
+    NO FIX        : polblogs<525.7
+    Returns (verdict_str, detail_str) where detail lists five values and any shortfalls.
     """
-    beats = sum(1 for net in net_names
-                if arm_results_5seed.get(net, {}).get("mean", 0) > FROZEN_REF.get(net, float("inf")))
-    if beats >= 4:   return "FIX CONFIRMED"
-    elif beats >= 2: return "TRADE-OFF"
-    else:            return "NO FIX"
+    vals     = {net: arm_5seed_means.get(net, 0.0) for net in FLOORS}
+    polblogs_ok = vals["polblogs"] >= FLOORS["polblogs"]
+    missed   = [(net, vals[net], FLOORS[net], FLOORS[net]-vals[net])
+                for net in FLOORS if vals[net] < FLOORS[net]]
+    detail   = "  ".join(f"{n}:{vals[n]:.1f}(fl={FLOORS[n]})" for n in FLOORS)
+    if polblogs_ok and not missed:
+        return "FIX CONFIRMED", detail
+    elif polblogs_ok:
+        miss_str = ", ".join(f"{n}={v:.1f}<{fl:.1f}(short {s:.1f})"
+                             for n,v,fl,s in missed)
+        return "TRADE-OFF", f"{detail}  MISSED: {miss_str}"
+    else:
+        short = FLOORS["polblogs"] - vals["polblogs"]
+        return "NO FIX", f"{detail}  polblogs short by {short:.1f}"
 
 
 def _parse_args():
@@ -313,17 +335,13 @@ def main():
         print()
 
     # ── Verdicts ────────────────────────────────────────────────────────────
-    print("\n\nVERDICTS (5-seed, vs frozen_ref = FIX CONFIRMED ≥4/5 / TRADE-OFF 2-3/5 / NO FIX <2/5):")
+    print("\n\nVERDICTS (pre-registered floors: polblogs≥525.7 FF_1000≥440 FF_2000≥900 Modular_FF≥400 Rice_FB≥200):")
     for key in [k for k in loaded if k.endswith("_final")]:
-        arm_res = {net: results.get(net,{}).get(key,{}).get("5seed",{})
-                   for net in net_names}
-        v = verdict(arm_res, net_names)
-        beats_str = ", ".join(
-            f"{net}:{arm_res.get(net,{}).get('mean',0):.1f}>ref:{FROZEN_REF.get(net)}"
-            for net in net_names
-            if arm_res.get(net,{}).get("mean",0) > FROZEN_REF.get(net,float("inf"))
-        )
-        print(f"  {key:<28}  {v}  (beats: {beats_str or 'none'})")
+        arm_means = {net: results.get(net,{}).get(key,{}).get("5seed",{}).get("mean",0)
+                     for net in net_names}
+        v, detail = verdict(arm_means)
+        print(f"  {key:<28}  {v}")
+        print(f"    {detail}")
 
     wall = time.time() - t0
     print(f"\n[c1-eval] wall={wall:.0f}s ({wall/60:.1f} min)", flush=True)

@@ -14,12 +14,21 @@ FROZEN_REF = {"FF_1000":448.6,"FF_2000":915.0,"Modular_FF":414.4,"Rice_FB":214.1
 
 VERDICT_ROWS = ["c1_50_50_final","c1_2to1_final"]
 
-def verdict(arm_5seed_means, net_names):
-    beats = sum(1 for n in net_names
-                if arm_5seed_means.get(n,0) > FROZEN_REF.get(n,float("inf")))
-    if beats >= 4:   return "FIX CONFIRMED"
-    elif beats >= 2: return "TRADE-OFF"
-    else:            return "NO FIX"
+FLOORS = {"polblogs":525.7,"FF_1000":440.0,"FF_2000":900.0,"Modular_FF":400.0,"Rice_FB":200.0}
+
+def verdict(arm_5seed_means):
+    """Pre-registered: FIX CONFIRMED/TRADE-OFF/NO FIX per exact floors."""
+    vals = {n: arm_5seed_means.get(n,0.0) for n in FLOORS}
+    polblogs_ok = vals["polblogs"] >= FLOORS["polblogs"]
+    missed = [(n,vals[n],FLOORS[n],FLOORS[n]-vals[n]) for n in FLOORS if vals[n] < FLOORS[n]]
+    detail = "  ".join(f"{n}:{vals[n]:.1f}(fl={FLOORS[n]})" for n in FLOORS)
+    if polblogs_ok and not missed:
+        return "FIX CONFIRMED", detail
+    elif polblogs_ok:
+        miss_str = ", ".join(f"{n}={v:.1f}<{fl:.1f}(short {s:.1f})" for n,v,fl,s in missed)
+        return "TRADE-OFF", f"{detail}  MISSED: {miss_str}"
+    else:
+        return "NO FIX", f"{detail}  polblogs short by {FLOORS['polblogs']-vals['polblogs']:.1f}"
 
 def main():
     all_results = {}
@@ -76,14 +85,13 @@ def main():
             print(f"    {net}: disc={md}  frac(d>0.9)={fd}")
 
     # ── Verdicts ─────────────────────────────────────────────────────────
-    print("\nVERDICTS (5-seed vs frozen_ref):")
+    print("\nVERDICTS (pre-registered: polblogs≥525.7 FF_1000≥440 FF_2000≥900 Modular_FF≥400 Rice_FB≥200):")
     for key in VERDICT_ROWS:
         arm_means = {n: all_results.get(n,{}).get(key,{}).get("5seed",{}).get("mean",0)
                      for n in net_names}
-        v = verdict(arm_means, net_names)
-        beats = [f"{n}:{arm_means[n]:.1f}>ref:{FROZEN_REF[n]}"
-                 for n in net_names if arm_means[n] > FROZEN_REF.get(n,float("inf"))]
-        print(f"  {key:<28}  {v}  beats={beats or 'none'}")
+        v, detail = verdict(arm_means)
+        print(f"  {key:<28}  {v}")
+        print(f"    {detail}")
 
     # ── Save ─────────────────────────────────────────────────────────────
     out = {
