@@ -959,12 +959,21 @@ Networks: polblogs (10 seeds), FF_1000 (10 seeds), Rice_FB (10 seeds),
 `compute_node_features_fast(cache, S, offered, t, k=X, env)` use
 `round_ratio = env.t / X` as one of the 21 features.
 
-**Convention A — budget-aware models (OURS: unified/largek, lstm_v1/budget.pt):**
+**Convention A — largek + lstm_v1/budget models (rev_gnn_lstm_largek.pt, rev_gnn_lstm_budget.pt):**
   - Pass `k = graph.number_of_nodes()` (= `cache["n"]`)
-  - Rationale: run_largek_eval.py (the harness that produced all certified Gate S
-    numbers, e.g. 473.1 on FF_1000 k=40) passes `k=n_val=n_nodes`, NOT the budget-k.
+  - Rationale: run_largek_eval.py passes `k=n_val=n_nodes`, NOT the budget-k.
   - `round_ratio` then measures "fraction of graph explored so far" (0→1 over episode).
-  - Matching training convention for rev_gnn_lstm_unified.pt and rev_gnn_lstm_largek.pt.
+  - Confirmed: largek.pt (3033620a) Mac=471.2 ≈ Server=473.1 at k=40 seeds=[42,123,7] PASS ✓
+
+**Convention B — unified specialist (rev_gnn_lstm_unified.pt sha=57c23076):**
+  - Pass `k = budget_k` (the k-value of the current eval episode)
+  - `round_ratio = env.t / budget_k` — measures progress through this budget's episode.
+  - Confirmed: unified.pt (57c23076) FF_1000 k=10 seeds=[42,123,7]:
+      Convention B MEAN=370.4 ≈ 352.7 PASS ✓
+      Convention A MEAN=112.3 FAIL (3× lower — confirms A is wrong for this model)
+  - NOTE: unified_sweep.json recorded original sha=00071438 (gate checkpoint).
+    Current sha=57c23076 is a different checkpoint; Convention B still passes the 352.7
+    anchor (within tolerance), so it is used as OURS_SMALL in the k-sweep.
 
 **Convention B — unconstrained-trained arms (arm_a: rev_gnn_lstm_ba.pt, arm_b: rev_gnn_lstm_densemix.pt):**
   - Pass `k = 50` (`_ARM_K = 50`) — the fixed budget used during their training

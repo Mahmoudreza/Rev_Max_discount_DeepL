@@ -110,8 +110,16 @@ def _avail(env, n, device):
     for i in env.available_nodes: m[i] = True
     return m
 
-def _feat_budget(cache, env, k):
+def _feat_budget_unified(cache, env, k):
+    """Convention B: k_feat=budget_k — matches rev_gnn_lstm_unified.pt training."""
+    return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=k, env=env)
+
+def _feat_budget_largek(cache, env, k):
+    """Convention A: k_feat=n_nodes — matches rev_gnn_lstm_largek.pt training."""
     return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=cache["n"], env=env)
+
+# lstm_v1 uses same convention as largek (budget-trained with k=n_nodes)
+_feat_budget = _feat_budget_largek
 
 _ARM_K = 50
 def _feat_unconstrained(cache, env, k):
@@ -296,14 +304,16 @@ def main():
             print(f"\n[ksweep] {net_name}  k={k}  B={B:.1f}", flush=True)
             r = {}
 
-            ours_pol = pol_small if k < K_SWITCH else pol_large
+            ours_pol  = pol_small if k < K_SWITCH else pol_large
+            # unified uses Convention B (k_feat=budget_k); largek uses Convention A (k_feat=n_nodes)
+            ours_feat = _feat_budget_unified if k < K_SWITCH else _feat_budget_largek
             r["greedy_budget"]   = eval_greedy_k(G, k, B)
             print(f"  Greedy+Budget={r['greedy_budget']:.1f}", flush=True)
 
             r["caldp_composite"] = eval_caldp_k(G, k, B)
             print(f"  Cal-DP composite={r['caldp_composite']:.1f}", flush=True)
 
-            r["ours"], r["ours_acct_err"] = eval_policy_k(ours_pol, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
+            r["ours"], r["ours_acct_err"] = eval_policy_k(ours_pol, G, cache, ei, k, B, device, ours_feat, skip_enforce=True)
             print(f"  OURS={r['ours']:.1f}  acct_err={r['ours_acct_err']:.2e}", flush=True)
 
             r["lstm_v1"], r["lstm_v1_acct_err"] = eval_policy_k(pol_lstmv1, G, cache, ei, k, B, device, _feat_budget, skip_enforce=True)
