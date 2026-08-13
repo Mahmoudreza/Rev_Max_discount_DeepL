@@ -998,3 +998,25 @@ Cause: floating-point order-of-operations differences (GPU CUDA fast-math, CPU s
   - All paper-table numbers must come from a single machine (the GPU server).
   - Mac is for development and sanity-checking (anchors within ±2% are fine).
   - Gate thresholds were set from server numbers → evaluate gates on server only.
+
+---
+## FEATURE CONVENTION PER CHECKPOINT — check before any eval
+
+| role | checkpoint | sha8 | feature_fn | k_feat | convention |
+|------|-----------|------|-----------|--------|-----------|
+| OURS_SMALL (k<20) | rev_gnn_lstm_unified.pt | 57c23076 | _feat_budget_unified | budget_k (episode k) | **B** |
+| OURS_LARGE (k>=20) | rev_gnn_lstm_largek.pt | 3033620a | _feat_budget_largek | n_nodes | **A** |
+| lstm_v1 | rev_gnn_lstm_budget.pt | a7828957 | _feat_budget (=_feat_budget_largek) | n_nodes | **A** |
+| arm_a | rev_gnn_lstm_ba.pt | 32a9053a | _feat_unconstrained | _ARM_K=50 (fixed) | **arm** |
+| arm_b | rev_gnn_lstm_densemix.pt | 0b549f93 | _feat_unconstrained | _ARM_K=50 (fixed) | **arm** |
+
+Convention A: `compute_budget_node_features_fast(cache, ..., k=cache["n"])` → round_ratio=t/n_nodes
+Convention B: `compute_budget_node_features_fast(cache, ..., k=budget_k)` → round_ratio=t/budget_k
+arm:          `compute_node_features_fast(cache, ..., _ARM_K=50)` → no budget feature, unconstrained harness
+
+Verification anchors (FF_1000 k=10, seeds=[42,123,7], Convention B):
+  00071438 (gatefail/original gate): 352.74 — from unified_sweep.json gate_results.ff_k10
+  57c23076 (unified/ep200, current): 370.4  — confirmed CLAUDE.md line 972
+
+Confirmed 2026-08-13: all roles in eval_all_methods_ksweep.py use correct convention.
+No sweep rerun required.
