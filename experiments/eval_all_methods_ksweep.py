@@ -56,6 +56,8 @@ OURS_LARGE   = os.path.join(CKPT_DIR, "rev_gnn_lstm_largek.pt")
 LSTM_V1_CKPT = os.path.join(CKPT_DIR, "rev_gnn_lstm_budget.pt")
 ARM_A_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_ba.pt")
 ARM_B_CKPT   = os.path.join(CKPT_DIR, "rev_gnn_lstm_densemix.pt")
+C1_50_CKPT   = os.path.join(CKPT_DIR, "c1_ffba_50_50_final.pt")   # sha a190f4e3
+C1_2TO1_CKPT = os.path.join(CKPT_DIR, "c1_ffba_2to1_final.pt")    # sha fbea89ca
 
 LOG_OUT   = "results/logs/budget_sweep_all_networks.json"
 TOPO_OUT  = "results/logs/network_topology_stats.json"
@@ -82,7 +84,8 @@ def _verify_shas():
         if not match:
             ok = False
     # Arms: print sha but don't enforce (ep80 known)
-    for label, ckpt in [("arm_a", ARM_A_CKPT), ("arm_b", ARM_B_CKPT)]:
+    for label, ckpt in [("arm_a", ARM_A_CKPT), ("arm_b", ARM_B_CKPT),
+                        ("c1_50_50", C1_50_CKPT), ("c1_2to1", C1_2TO1_CKPT)]:
         sha = _sha8(ckpt) if os.path.exists(ckpt) else "MISSING"
         print(f"  SHA INFO: {label} sha8={sha}", flush=True)
     return ok
@@ -125,6 +128,21 @@ _ARM_K = 50
 def _feat_unconstrained(cache, env, k):
     base = compute_node_features_fast(cache, env.S, env.offered, env.t, _ARM_K, env)
     return np.concatenate([base, np.ones((cache["n"],1), dtype=np.float32)], axis=1)
+
+def _load_policy_c1(ckpt, device):
+    """Loader for C1 (unconstrained) arms trained with in_dim=20."""
+    enc = GraphSAGEEncoder(in_dim=20, hidden_dim=64, n_layers=2)
+    lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
+    pol = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
+    sd = torch.load(ckpt, map_location=device, weights_only=True)
+    if "policy_state_dict" in sd: sd = sd["policy_state_dict"]
+    elif "model_state_dict" in sd: sd = sd["model_state_dict"]
+    pol.load_state_dict(sd, strict=True)
+    return pol.to(device).eval()
+
+def _feat_c1(cache, env, k):
+    """20-feature (no budget dummy) — matches C1 FFBA arms training."""
+    return compute_node_features_fast(cache, env.S, env.offered, env.t, _ARM_K, env)
 
 @torch.no_grad()
 def eval_policy_episode(policy, G, cache, ei, k, B, seed, device, feat_fn, skip_enforce=False):
@@ -281,8 +299,12 @@ def main():
     pol_small  = _load_policy(OURS_SMALL, device)
     pol_large  = _load_policy(OURS_LARGE, device)
     pol_lstmv1 = _load_policy(LSTM_V1_CKPT, device)
-    pol_arma   = _load_policy(ARM_A_CKPT, device)
-    pol_armb   = _load_policy(ARM_B_CKPT, device)
+    pol_arma     = _load_policy(ARM_A_CKPT, device)
+    pol_armb     = _load_policy(ARM_B_CKPT, device)
+    pol_c1_50    = _load_policy_c1(C1_50_CKPT, device)   if os.path.exists(C1_50_CKPT)   else None
+    pol_c1_2to1  = _load_policy_c1(C1_2TO1_CKPT, device) if os.path.exists(C1_2TO1_CKPT) else None
+    if pol_c1_50   is None: print("[ksweep] WARNING: c1_50_50 checkpoint missing — skipping", flush=True)
+    if pol_c1_2to1 is None: print("[ksweep] WARNING: c1_2to1 checkpoint missing — skipping",  flush=True)
 
     # Apply network filter
     if net_filter:
@@ -323,15 +345,22 @@ def main():
             print(f"  arm_a={r['arm_a']:.1f}  acct_err={r['arm_a_acct_err']:.2e}", flush=True)
 
             r["arm_b"], r["arm_b_acct_err"] = eval_policy_k(pol_armb, G, cache, ei, k, B, device, _feat_unconstrained)
-            print(f"  arm_b={r['arm_b']:.1f}  acct_err={r['arm_b_acct_err']:.2e}  ({time.time()-t_k:.0f}s)", flush=True)
+            print(f"  arm_b={r['arm_b']:.1f}  acct_err={r['arm_b_acct_err']:.2e}", flush=True)
+
+            if pol_c1_50 is not None:
+                r["c1_50_50"], r["c1_50_50_acct_err"] = eval_policy_k(pol_c1_50, G, cache, ei, k, B, device, _feat_c1)
+                print(f"  c1_50_50={r['c1_50_50']:.1f}  acct_err={r['c1_50_50_acct_err']:.2e}", flush=True)
+            if pol_c1_2to1 is not None:
+                r["c1_2to1"], r["c1_2to1_acct_err"] = eval_policy_k(pol_c1_2to1, G, cache, ei, k, B, device, _feat_c1)
+                print(f"  c1_2to1={r['c1_2to1']:.1f}  acct_err={r['c1_2to1_acct_err']:.2e}  ({time.time()-t_k:.0f}s)", flush=True)
 
             all_results[net_name][k] = r
 
     wall = time.time() - t_start
 
     # ── Print tables (only computed networks/k-values) ────────────────────
-    METHODS = ["greedy_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b"]
-    MLABELS = ["Greedy+B","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)"]
+    METHODS = ["greedy_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b","c1_50_50","c1_2to1"]
+    MLABELS = ["Greedy+B","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)","c1_50/50","c1_2:1"]
     for net_name in all_results:
         print(f"\n── {net_name} ──")
         print(f"{'method':<14}", end="")
@@ -341,7 +370,8 @@ def main():
         for m, ml in zip(METHODS, MLABELS):
             print(f"{ml:<14}", end="")
             for k in k_filter:
-                print(f"  {all_results[net_name][k][m]:>5.0f}", end="")
+                v = all_results[net_name][k].get(m, None)
+                print(f"  {v:>5.0f}" if v is not None else "    --", end="")
             print()
 
     # ── Summary lines (only over computed cells) ──────────────────────────
