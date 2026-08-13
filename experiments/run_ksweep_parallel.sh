@@ -67,7 +67,7 @@ PIDS+=($!)
 
 echo ""
 echo "[pids] ${PIDS[*]}"
-echo "Monitor: tail -5 /tmp/ksweep_*.log"
+echo "Monitor: for f in /tmp/ksweep_*.log; do echo \"==> \$f\"; tail -n 3 \$f; done"
 echo ""
 echo "Waiting for all 6 workers..."
 FAILED=0
