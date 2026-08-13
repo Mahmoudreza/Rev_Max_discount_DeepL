@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""eval_all_methods_ksweep.py — 6-method k-sweep [5,10,15,20,30,40], BudgetRevenueEnv, all 5 networks.
+"""eval_all_methods_ksweep.py — 9-method k-sweep [5,10,15,20,30,40], BudgetRevenueEnv, all 5 networks.
 
-Methods (ALL in BudgetRevenueEnv, B=k*C, C=0.3):
+ALL methods are evaluated inside BudgetRevenueEnv (B=k*C, C=0.3).
+Budget-aware methods (1-5) know B; unconstrained-trained methods (6-9) do NOT
+know B but the env still enforces bankruptcy — i.e. they stop when B<0.
+
+Methods:
   1. Greedy+Budget        — Babaei 2013 budget-aware
-  2. Cal-DP composite     — max(v2, v3) per trial, fresh calibration per (network, k)
-  3. OURS                 — deployment rule: unified(k<20) | largek(k>=20)
-  4. lstm_v1              — rev_gnn_lstm_budget.pt (a7828957)
-  5. arm_a (unconstrained-trained) — rev_gnn_lstm_ba.pt, sha 32a9053a
-  6. arm_b (unconstrained-trained) — rev_gnn_lstm_densemix.pt, sha 00368482, ep80
+  2. IE-Strategy          — Babaei et al. IE under §3.2 budget feasibility
+  3. Cal-DP composite     — max(v2, v3) per trial, fresh calibration per (network, k)
+  4. OURS                 — deployment rule: unified(k<20) | largek(k>=20) [budget-trained]
+  5. lstm_v1              — rev_gnn_lstm_budget.pt (a7828957) [budget-trained]
+  ── C1 arms: trained on RevenueEnv (NO budget), evaluated in BudgetRevenueEnv ──
+  6. arm_a (C1-unc)       — rev_gnn_lstm_ba.pt, sha 32a9053a, in_dim=21+dummy
+  7. arm_b (C1-unc)       — rev_gnn_lstm_densemix.pt, sha 00368482 ep80, in_dim=21+dummy
+  8. c1_50/50 (C1-unc)    — c1_ffba_50_50_final.pt, sha a190f4e3, in_dim=20, FF:BA=1:1
+  9. c1_2:1  (C1-unc)     — c1_ffba_2to1_final.pt,  sha fbea89ca, in_dim=20, FF:BA=2:1
 
 Run on server:
     python -u experiments/eval_all_methods_ksweep.py 2>&1 | tee /tmp/all_methods_ksweep.log
