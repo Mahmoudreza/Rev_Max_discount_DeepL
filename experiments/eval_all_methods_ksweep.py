@@ -89,10 +89,13 @@ def _avail(env, n, device):
     return m
 
 def _feat_budget(cache, env, k):
-    return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=k, env=env)
+    # OURS/lstm_v1 trained with k=n_val for round_ratio (matches run_largek_eval.py)
+    return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=cache["n"], env=env)
 
+_ARM_K = 50   # arm_a/arm_b trained at fixed K=50 — keep for round_ratio consistency with training
 def _feat_unconstrained(cache, env, k):
-    base = compute_node_features_fast(cache, env.S, env.offered, env.t, k, env)
+    # arms: run_topology_arms.py trained with k=K=50; budget_col frozen at 1.0
+    base = compute_node_features_fast(cache, env.S, env.offered, env.t, _ARM_K, env)
     return np.concatenate([base, np.ones((cache["n"],1), dtype=np.float32)], axis=1)
 
 @torch.no_grad()

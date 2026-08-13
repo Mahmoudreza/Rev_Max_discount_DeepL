@@ -87,11 +87,15 @@ def _avail(env, n, device):
 
 # ── Budget-aware feature (actual budget_remaining/B as dim 21) ─────────────
 def _feat_budget(cache, env, k):
-    return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=k, env=env)
+    # Feature fn expects n_nodes for round_ratio normalisation, NOT budget-k.
+    # (matches run_largek_eval.py which passes k=n_val=graph.number_of_nodes())
+    return compute_budget_node_features_fast(cache, env.S, env.offered, env.t, k=cache["n"], env=env)
 
 # ── Unconstrained proxy feature (budget_col=1.0 always) ────────────────────
+_ARM_K = 50   # arm_a/arm_b trained at fixed K=50 in run_topology_arms.py
 def _feat_unconstrained(cache, env, k):
-    base = compute_node_features_fast(cache, env.S, env.offered, env.t, k, env)
+    # arms: round_ratio uses K=50 matching training convention
+    base = compute_node_features_fast(cache, env.S, env.offered, env.t, _ARM_K, env)
     return np.concatenate([base, np.ones((cache["n"],1), dtype=np.float32)], axis=1)
 
 @torch.no_grad()
