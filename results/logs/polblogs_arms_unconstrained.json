@@ -1,0 +1,65 @@
+{
+  "protocol": "unconstrained_RevenueEnv",
+  "env_class": "RevenueEnv",
+  "k_feat_conventions": [
+    0,
+    50
+  ],
+  "budget_ratio": 0.0,
+  "seeds_A": [
+    42
+  ],
+  "seeds_B": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "arm_a_sha": "32a9053a",
+  "arm_b_sha": "0b549f93",
+  "reference": {
+    "greedy_disc_A": 525.7,
+    "greedy_disc_B": 530.4,
+    "lstm_A": 370.4,
+    "lstm_B": 374.2
+  },
+  "results": {
+    "arm_a": {
+      "k0": {
+        "protocol_a_rev": 127.03,
+        "protocol_b_rev": 129.47,
+        "proto_a_mean_disc": 0.0073,
+        "proto_b_mean_disc": 0.0077,
+        "proto_a_frac_d09": 0.0008,
+        "proto_b_frac_d09": 0.001
+      },
+      "k50": {
+        "protocol_a_rev": 255.41,
+        "protocol_b_rev": 229.69,
+        "proto_a_mean_disc": 0.0436,
+        "proto_b_mean_disc": 0.062,
+        "proto_a_frac_d09": 0.0074,
+        "proto_b_frac_d09": 0.018
+      }
+    },
+    "arm_b": {
+      "k0": {
+        "protocol_a_rev": 185.16,
+        "protocol_b_rev": 192.46,
+        "proto_a_mean_disc": 0.4689,
+        "proto_b_mean_disc": 0.4669,
+        "proto_a_frac_d09": 0.0,
+        "proto_b_frac_d09": 0.0
+      },
+      "k50": {
+        "protocol_a_rev": 606.74,
+        "protocol_b_rev": 623.35,
+        "proto_a_mean_disc": 0.0475,
+        "proto_b_mean_disc": 0.0412,
+        "proto_a_frac_d09": 0.0049,
+        "proto_b_frac_d09": 0.0025
+      }
+    }
+  }
+}
