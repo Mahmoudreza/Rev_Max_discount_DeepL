@@ -377,7 +377,11 @@ def main():
 
     # ── Print tables (only computed networks/k-values) ────────────────────
     METHODS = ["greedy_budget","ie_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b","c1_50_50","c1_2to1"]
-    MLABELS = ["Greedy+B","IE-Strat","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)","c1_50/50","c1_2:1"]
+    MLABELS = ["Greedy+B","IE-Strat","Cal-DP","OURS","lstm_v1",
+               "arm_a(BB)",   # BB=budget-blind: no budget feature, trained unconstrained
+               "arm_b(BB)",   # BB=budget-blind: no budget feature, trained unconstrained
+               "c1_50/50(BB)",# BB=budget-blind: trained unconstrained, in_dim=20
+               "c1_2:1(BB)",] # BB=budget-blind: trained unconstrained, in_dim=20
     for net_name in all_results:
         print(f"\n── {net_name} ──")
         print(f"{'method':<14}", end="")
