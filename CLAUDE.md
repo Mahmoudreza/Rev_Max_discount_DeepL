@@ -948,3 +948,44 @@ Networks: polblogs (10 seeds), FF_1000 (10 seeds), Rice_FB (10 seeds),
   git add CLAUDE.md results/logs/topology_arms_eval.json
   git commit -m "topology arms gate B final: <VERDICT> (polblogs=X FF=Y Rice=Z)"
   Print hash only.
+
+---
+
+## EVAL HARNESS CONVENTIONS (2026-08-13 — mandatory reading before writing eval code)
+
+### round_ratio normalisation — TWO conventions in use, DO NOT mix
+
+`compute_budget_node_features_fast(cache, S, offered, t, k=X, env)` and
+`compute_node_features_fast(cache, S, offered, t, k=X, env)` use
+`round_ratio = env.t / X` as one of the 21 features.
+
+**Convention A — budget-aware models (OURS: unified/largek, lstm_v1/budget.pt):**
+  - Pass `k = graph.number_of_nodes()` (= `cache["n"]`)
+  - Rationale: run_largek_eval.py (the harness that produced all certified Gate S
+    numbers, e.g. 473.1 on FF_1000 k=40) passes `k=n_val=n_nodes`, NOT the budget-k.
+  - `round_ratio` then measures "fraction of graph explored so far" (0→1 over episode).
+  - Matching training convention for rev_gnn_lstm_unified.pt and rev_gnn_lstm_largek.pt.
+
+**Convention B — unconstrained-trained arms (arm_a: rev_gnn_lstm_ba.pt, arm_b: rev_gnn_lstm_densemix.pt):**
+  - Pass `k = 50` (`_ARM_K = 50`) — the fixed budget used during their training
+    in run_topology_arms.py where K=50 is hardcoded.
+  - `round_ratio` measures "fraction of budget-50 episode elapsed".
+  - This convention is also used by run_topology_arms_eval.py (the correct Gate B harness).
+
+**COMMON BUG:** passing the budget-k value (5/10/15/20/30/40/50) as k=X to
+`compute_budget_node_features_fast` when evaluating OURS/lstm_v1 corrupts round_ratio
+by ~25× (e.g. t/40 instead of t/1000 on FF_1000), collapsing revenue to near-zero
+(9.9/49.0/92.3 observed at k=20/30/40 on FF_1000 with the broken harness).
+Fixed in eval_all_methods_ksweep.py + eval_all_methods_k50.py commit 798eb5a.
+
+### Mac vs GPU server: ~0.4% numeric discrepancy
+
+Identical checkpoint + identical seeds give slightly different revenues on Mac (CPU)
+vs the GPU server. Example: OURS_LARGE on FF_1000 k=40 seeds=[42,123,7]:
+  Mac CPU: 471.2   Server GPU: 473.1   delta: -0.4%
+
+Cause: floating-point order-of-operations differences (GPU CUDA fast-math, CPU serial).
+**Rule:** DO NOT mix machine sources in the same table row.
+  - All paper-table numbers must come from a single machine (the GPU server).
+  - Mac is for development and sanity-checking (anchors within ±2% are fine).
+  - Gate thresholds were set from server numbers → evaluate gates on server only.
