@@ -320,7 +320,8 @@ def main():
     sd = torch.load(BASE_CKPT, map_location='cpu', weights_only=True)
     if 'policy_state_dict' in sd: sd = sd['policy_state_dict']
     policy.load_state_dict(sd, strict=False)   # strict=False: allow LSTM weight mismatch
-    print(f"[main-{tag}] warm-start loaded (strict=False for LSTM dims)", flush=True)
+    policy = policy.to(device)
+    print(f"[main-{tag}] warm-start loaded (strict=False for LSTM dims), moved to {device}", flush=True)
 
     # Build training graphs
     ff_graphs    = [generate_forest_fire(n, 0.37, 0.32, seed=i) for i,n in enumerate(FF_SIZES)]
