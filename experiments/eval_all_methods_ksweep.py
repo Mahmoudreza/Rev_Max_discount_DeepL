@@ -38,6 +38,7 @@ from src.utils.budget_features import compute_budget_node_features_fast
 from src.evaluation.budget_baselines import greedy_discount_budget
 from src.evaluation.dp_calibrated_v2 import dp_calibrated_v2_budget
 from src.evaluation.dp_calibrated_v3 import dp_calibrated_v3_budget
+from src.evaluation.ie_budget import ie_strategy_budget, IE_K_SEEDS
 
 # ── Protocol ──────────────────────────────────────────────────────────────────
 K_VALUES   = [5, 10, 15, 20, 30, 40]
@@ -198,6 +199,11 @@ def eval_greedy_k(G, k, B):
     res = greedy_discount_budget(G, B=B, c=C, b=b_RAY, n_trials=N_TRIALS, weight_high=W_HIGH)
     return res["revenue"]["mean"]
 
+def eval_ie_k(G, k, B):
+    res = ie_strategy_budget(G, B=B, c=C, k_seeds=IE_K_SEEDS,
+                             n_trials=N_TRIALS, weight_high=W_HIGH)
+    return float(res["revenue"]["mean"])
+
 def eval_caldp_k(G, k, B):
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=0,
                          weight_high=W_HIGH, n_mc_samples=N_MC)
@@ -332,6 +338,9 @@ def main():
             r["greedy_budget"]   = eval_greedy_k(G, k, B)
             print(f"  Greedy+Budget={r['greedy_budget']:.1f}", flush=True)
 
+            r["ie_budget"] = eval_ie_k(G, k, B)
+            print(f"  IE-Strategy={r['ie_budget']:.1f}", flush=True)
+
             r["caldp_composite"] = eval_caldp_k(G, k, B)
             print(f"  Cal-DP composite={r['caldp_composite']:.1f}", flush=True)
 
@@ -359,8 +368,8 @@ def main():
     wall = time.time() - t_start
 
     # ── Print tables (only computed networks/k-values) ────────────────────
-    METHODS = ["greedy_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b","c1_50_50","c1_2to1"]
-    MLABELS = ["Greedy+B","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)","c1_50/50","c1_2:1"]
+    METHODS = ["greedy_budget","ie_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b","c1_50_50","c1_2to1"]
+    MLABELS = ["Greedy+B","IE-Strat","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)","c1_50/50","c1_2:1"]
     for net_name in all_results:
         print(f"\n── {net_name} ──")
         print(f"{'method':<14}", end="")
