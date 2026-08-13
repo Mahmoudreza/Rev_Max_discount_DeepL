@@ -17,7 +17,7 @@ Outputs:
   results/logs/network_topology_stats.json
 """
 from __future__ import annotations
-import hashlib, json, os, sys, time
+import argparse, hashlib, json, os, sys, time
 import numpy as np
 import torch
 import networkx as nx
@@ -198,10 +198,39 @@ def compute_topo_stats(G, name):
     }
 
 
+def _parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--networks", nargs="+", default=None,
+                   metavar="NET",
+                   help="Subset of networks to run (default: all 5). "
+                        "Valid: polblogs FF_1000 Rice_FB Modular_FF FF_2000")
+    p.add_argument("--k-values", nargs="+", type=int, default=None,
+                   metavar="K",
+                   help="Subset of k values to run (default: all 6). "
+                        "Valid: 5 10 15 20 30 40")
+    return p.parse_args()
+
+
 def main():
+    args = _parse_args()
+
+    # Apply CLI filters (inner logic unchanged — only iterate subset)
+    k_filter  = args.k_values if args.k_values else K_VALUES
+    net_filter = args.networks if args.networks else None  # None = all
+
+    # Derive a unique output path so parallel workers don't clobber each other
+    if net_filter or k_filter != K_VALUES:
+        net_tag = "_".join(net_filter) if net_filter else "all"
+        k_tag   = "k" + "-".join(str(k) for k in k_filter)
+        log_out = f"results/logs/budget_sweep_{net_tag}_{k_tag}.json"
+    else:
+        log_out = LOG_OUT
+
     t_start = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[ksweep] k={K_VALUES}  C={C}  N_TRIALS={N_TRIALS}  device={device}", flush=True)
+    print(f"[ksweep] k={k_filter}  nets={net_filter or 'all'}  "
+          f"C={C}  N_TRIALS={N_TRIALS}  device={device}", flush=True)
+    print(f"[ksweep] output → {log_out}", flush=True)
 
     # SHA verification
     print("\n[ksweep] Verifying checkpoint SHAs...", flush=True)
@@ -245,13 +274,21 @@ def main():
     pol_arma   = _load_policy(ARM_A_CKPT, device)
     pol_armb   = _load_policy(ARM_B_CKPT, device)
 
+    # Apply network filter
+    if net_filter:
+        missing = [n for n in net_filter if n not in networks]
+        if missing:
+            print(f"ABORT: unknown network(s): {missing}", flush=True)
+            sys.exit(1)
+        networks = {n: networks[n] for n in net_filter}
+
     # Main sweep
     all_results = {}
     for net_name, G in networks.items():
         all_results[net_name] = {}
         cache = caches[net_name]; ei = eis[net_name]
 
-        for k in K_VALUES:
+        for k in k_filter:
             B = k * C
             t_k = time.time()
             print(f"\n[ksweep] {net_name}  k={k}  B={B:.1f}", flush=True)
@@ -280,59 +317,64 @@ def main():
 
     wall = time.time() - t_start
 
-    # ── Print tables ─────────────────────────────────────────────────────────
+    # ── Print tables (only computed networks/k-values) ────────────────────
     METHODS = ["greedy_budget","caldp_composite","ours","lstm_v1","arm_a","arm_b"]
     MLABELS = ["Greedy+B","Cal-DP","OURS","lstm_v1","arm_a(unc)","arm_b(unc)"]
-    for net_name in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
+    for net_name in all_results:
         print(f"\n── {net_name} ──")
         print(f"{'method':<14}", end="")
-        for k in K_VALUES: print(f"  k={k:2d}", end="")
+        for k in k_filter: print(f"  k={k:2d}", end="")
         print()
         print("─"*60)
         for m, ml in zip(METHODS, MLABELS):
             print(f"{ml:<14}", end="")
-            for k in K_VALUES:
+            for k in k_filter:
                 print(f"  {all_results[net_name][k][m]:>5.0f}", end="")
             print()
 
-    # ── Summary lines ────────────────────────────────────────────────────────
+    # ── Summary lines (only over computed cells) ──────────────────────────
     print("\n\nSUMMARY LINES:")
-    print("(a) Networks where OURS >= Greedy+Budget at EVERY k:")
-    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        if all(all_results[net][k]["ours"] >= all_results[net][k]["greedy_budget"] for k in K_VALUES):
+    computed_nets = list(all_results.keys())
+    print("(a) Networks where OURS >= Greedy+Budget at EVERY computed k:")
+    for net in computed_nets:
+        if all(all_results[net][k]["ours"] >= all_results[net][k]["greedy_budget"] for k in k_filter):
             print(f"    {net}")
-    print("(b) Networks where OURS >= Cal-DP composite at EVERY k:")
-    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        if all(all_results[net][k]["ours"] >= all_results[net][k]["caldp_composite"] for k in K_VALUES):
+    print("(b) Networks where OURS >= Cal-DP composite at EVERY computed k:")
+    for net in computed_nets:
+        if all(all_results[net][k]["ours"] >= all_results[net][k]["caldp_composite"] for k in k_filter):
             print(f"    {net}")
     print("(c) (network,k) where arm_a OR arm_b beats BOTH Greedy+Budget AND Cal-DP:")
     found_c = False
-    for net in ["polblogs","FF_1000","Rice_FB","Modular_FF","FF_2000"]:
-        for k in K_VALUES:
+    for net in computed_nets:
+        for k in k_filter:
             r = all_results[net][k]
             for arm_lbl, arm_val in [("arm_a",r["arm_a"]),("arm_b",r["arm_b"])]:
                 if arm_val > r["greedy_budget"] and arm_val > r["caldp_composite"]:
                     print(f"    {net} k={k} {arm_lbl}: {arm_val:.1f} > G={r['greedy_budget']:.1f} & D={r['caldp_composite']:.1f}")
                     found_c = True
     if not found_c: print("    None")
-    print("(d) polblogs — OURS(unified,k<20) vs lstm_v1 at k=5,10,15:")
-    for k in [5,10,15]:
-        r = all_results["polblogs"][k]
-        print(f"    k={k}: OURS={r['ours']:.1f}  lstm_v1={r['lstm_v1']:.1f}  delta={r['ours']-r['lstm_v1']:+.1f}")
+    if "polblogs" in all_results:
+        print("(d) polblogs — OURS(unified,k<20) vs lstm_v1 at k∈{5,10,15}∩computed:")
+        for k in [5,10,15]:
+            if k in k_filter and k in all_results.get("polblogs",{}):
+                r = all_results["polblogs"][k]
+                print(f"    k={k}: OURS={r['ours']:.1f}  lstm_v1={r['lstm_v1']:.1f}  delta={r['ours']-r['lstm_v1']:+.1f}")
 
     print(f"\nWall time: {wall:.0f}s  ({wall/60:.1f} min)")
 
     # ── Save results ─────────────────────────────────────────────────────────
+    os.makedirs("results/logs", exist_ok=True)
     out = {
-        "protocol": {"k_values": K_VALUES, "C": C, "n_trials": N_TRIALS,
+        "protocol": {"k_values": k_filter, "C": C, "n_trials": N_TRIALS,
                      "seeds": SEEDS, "weight_high": W_HIGH,
-                     "deployment_rule": f"unified k<{K_SWITCH}, largek k>={K_SWITCH}"},
+                     "deployment_rule": f"unified k<{K_SWITCH}, largek k>={K_SWITCH}",
+                     "networks": list(all_results.keys())},
         "shas": {os.path.basename(k): v for k, v in EXPECTED_SHAS.items()},
         "results": all_results,
         "wall_s": wall,
     }
-    with open(LOG_OUT, "w") as f: json.dump(out, f, indent=2)
-    print(f"Saved → {LOG_OUT}")
+    with open(log_out, "w") as f: json.dump(out, f, indent=2)
+    print(f"Saved → {log_out}")
 
 
 if __name__ == "__main__":
