@@ -295,8 +295,10 @@ def main():
         print(f"  {key}: {fname}  sha={actual_sha}  "
               f"{'OK' if sha_ok else 'MISMATCH vs '+expected_sha}", flush=True)
         try:
-            # released_lstm was trained with in_dim=21 (budget features)
-            loader = _load_policy_21 if key == "released_lstm" else _load_policy
+            # released_lstm (rev_gnn_lstm.pt sha 8fbc4648) is the UNCONSTRAINED
+            # released model — in_dim=20, same as C1 arms. Only budget-trained
+            # checkpoints (rev_gnn_lstm_budget.pt) use in_dim=21.
+            loader = _load_policy
             loaded[key] = loader(path, device)
         except Exception as e:
             print(f"  LOAD ERROR {key}: {e}", flush=True)
@@ -324,8 +326,8 @@ def main():
         # Neural models
         for key, pol in loaded.items():
             t_m = time.time()
-            fk   = _REL_LSTM_K if key == "released_lstm" else 0
-            idim = 21 if key == "released_lstm" else 20
+            fk   = _REL_LSTM_K if key == "released_lstm" else 0  # 50 for ref, 0 for C1
+            idim = 20  # all models in this eval are in_dim=20
             r5  = eval_policy(pol, G, cache, ei, SEEDS_5,  device, fk, idim)
             r42 = eval_policy(pol, G, cache, ei, SEED_42, device, fk, idim)
             r[key] = {"5seed": r5, "seed42": r42, "phase": MODELS[key][2]}
