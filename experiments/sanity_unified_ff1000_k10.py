@@ -28,7 +28,12 @@ B      = K_BUD * C   # = 3.0
 W_HIGH = 2.0
 N_MC   = 5
 SEEDS  = [42, 123, 7]
+# Original gate used sha=00071438, both Mac+server now have sha=57c23076.
+# Test BOTH round_ratio conventions to identify which protocol matches ~352.7:
+#   Convention A: k_feat=n_nodes (largek harness)
+#   Convention B: k_feat=budget_k (possible unified harness)
 EXPECT = 352.7
+TOL    = 30.0
 
 def _edge_index(G, device):
     edges = list(G.edges())
@@ -82,6 +87,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sha8 = hashlib.sha256(open(CKPT,"rb").read()).hexdigest()[:8]
     print(f"[anchor-unified] unified.pt sha8={sha8}  k={K_BUD}  B={B:.1f}  device={device}")
+    print(f"  NOTE: original gate sha=00071438; current={sha8}")
 
     G = generate_forest_fire(1000, 0.37, 0.32, seed=0)
     n_val = G.number_of_nodes()
@@ -90,17 +96,40 @@ def main():
     ei    = _edge_index(G, device)
     pol   = _load(device)
 
-    revs = []
+    # Convention A: k_feat=n_nodes (largek harness convention)
+    print(f"\n--- Convention A: k_feat=n_nodes={n_val} (round_ratio=t/{n_val})")
+    revs_a = []
     for s in SEEDS:
         r = _run_episode(pol, G, cache, ei, s, device, k_feat=n_val)
-        revs.append(r)
+        revs_a.append(r)
         print(f"  seed={s}  rev={r:.1f}")
+    mean_a = float(np.mean(revs_a))
+    ok_a = abs(mean_a - EXPECT) < TOL
+    print(f"  MEAN_A={mean_a:.1f}  expected={EXPECT}  {'PASS ✓' if ok_a else 'FAIL'}")
 
-    mean = float(np.mean(revs))
-    print(f"\nMEAN={mean:.1f}  expected~{EXPECT}")
-    tol = 30.0
-    ok = abs(mean - EXPECT) < tol
-    print(f"ANCHOR: {'PASS' if ok else 'FAIL (|'+str(round(mean-EXPECT,1))+'| > '+str(tol)+')'}  wall={time.time()-t0:.0f}s")
+    # Convention B: k_feat=budget_k (possible unified training convention)
+    print(f"\n--- Convention B: k_feat=budget_k={K_BUD} (round_ratio=t/{K_BUD})")
+    revs_b = []
+    for s in SEEDS:
+        r = _run_episode(pol, G, cache, ei, s, device, k_feat=K_BUD)
+        revs_b.append(r)
+        print(f"  seed={s}  rev={r:.1f}")
+    mean_b = float(np.mean(revs_b))
+    ok_b = abs(mean_b - EXPECT) < TOL
+    print(f"  MEAN_B={mean_b:.1f}  expected={EXPECT}  {'PASS ✓' if ok_b else 'FAIL'}")
+
+    # Verdict
+    print(f"\n{'='*60}")
+    if ok_a:
+        print(f"ANCHOR: PASS  Convention A  MEAN={mean_a:.1f}  sha={sha8}")
+        print(f"  → ksweep should use k_feat=n_nodes (Convention A)")
+    elif ok_b:
+        print(f"ANCHOR: PASS  Convention B  MEAN={mean_b:.1f}  sha={sha8}")
+        print(f"  → ksweep must use k_feat=budget_k (Convention B) — update _feat_budget!")
+    else:
+        print(f"ANCHOR: FAIL  A={mean_a:.1f}  B={mean_b:.1f}  both differ from {EXPECT} by >{TOL}")
+        print(f"  sha={sha8} may not be the same model as gate sha=00071438")
+    print(f"  wall={time.time()-t0:.0f}s")
 
 if __name__ == "__main__":
     main()

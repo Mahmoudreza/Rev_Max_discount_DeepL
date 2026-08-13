@@ -61,8 +61,10 @@ LOG_OUT   = "results/logs/budget_sweep_all_networks.json"
 TOPO_OUT  = "results/logs/network_topology_stats.json"
 
 # Expected SHAs (fail fast if wrong checkpoint loaded)
+# unified.pt: original gate sha=00071438; current on both Mac+server=57c23076
+# (checkpoint was updated after unified_sweep.json was written; see CLAUDE.md)
 EXPECTED_SHAS = {
-    OURS_SMALL:   "00071438",
+    OURS_SMALL:   "57c23076",
     OURS_LARGE:   "3033620a",
     LSTM_V1_CKPT: "a7828957",
 }
