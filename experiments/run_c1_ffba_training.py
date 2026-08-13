@@ -293,7 +293,15 @@ def main():
     tag      = args.arm_tag
     ff_frac  = args.ratio if args.ratio is not None else (0.5 if tag=="50_50" else 2/3)
     cfg      = _cfg_obj()
-    device   = torch.device("cpu")   # CPU training (no MPS REINFORCE bug)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        # MPS: Phase-1 ok; Phase-2 REINFORCE crashes on Apple Silicon → force CPU
+        device = torch.device("cpu")
+        print(f"[main-{tag}] MPS detected but Phase-2 REINFORCE needs CPU; using CPU", flush=True)
+    else:
+        device = torch.device("cpu")
+    print(f"[main-{tag}] device={device}", flush=True)
 
     # Verify base checkpoint
     assert os.path.exists(BASE_CKPT), f"Missing {BASE_CKPT}"
