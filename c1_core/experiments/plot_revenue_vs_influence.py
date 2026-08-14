@@ -37,7 +37,9 @@ OUT_DIR   = "results/figures"
 
 
 def lstm_trajectory(policy, graph, cfg, is_lstm=True):
-    """Run one greedy episode; return (x=|S|_list, y=cum_revenue_list)."""
+    """Run one greedy episode.
+    Returns (x=step_t, y=cum_revenue) — one point per offer (submodular shape).
+    """
     device = torch.device("cpu")
     policy.to(device)
     static = compute_static_features(graph)
@@ -45,7 +47,7 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
     n, nodes = graph.number_of_nodes(), list(graph.nodes())
     xs, ys = [0], [0.0]
     cum_rev = 0.0
-    seed_count = 0
+    step = 0
 
     with torch.no_grad():
         env = _make_env(graph, cfg)
@@ -66,11 +68,10 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
             if nidx not in available:
                 nidx = available[0]
             _, rew, done, _ = env.step(nidx, disc)
-            if rew > 0:
-                cum_rev += rew
-                seed_count += 1
-                xs.append(seed_count)
-                ys.append(cum_rev)
+            cum_rev += max(0.0, float(rew))
+            step += 1
+            xs.append(step)
+            ys.append(cum_rev)            # record EVERY step (submodular curve)
             if is_lstm:
                 policy.update_sequence_state(disc, rew > 0, float(rew))
             if done:
@@ -80,7 +81,7 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
 
 
 def gd_trajectory_curve(graph, cfg):
-    """Run GD via env.step(); return (|S|, cum_revenue)."""
+    """Run GD via env.step(); return (step_t, cum_revenue) at every step."""
     traj = greedy_discount_trajectory(graph, cfg)
     env = _make_env(graph, cfg)
     env.reset()
@@ -88,18 +89,17 @@ def gd_trajectory_curve(graph, cfg):
     n = graph.number_of_nodes()
     xs, ys = [0], [0.0]
     cum_rev = 0.0
-    seed_count = 0
+    step = 0
     for item in traj:
         nidx, disc = item["node_idx"], item["discount"]
         node = nodes[nidx] if nidx < n else nodes[0]
         if node in env.offered:
             continue
         _, rew, done, _ = env.step(nidx, disc)
-        if rew > 0:
-            cum_rev += rew
-            seed_count += 1
-            xs.append(seed_count)
-            ys.append(cum_rev)
+        cum_rev += max(0.0, float(rew))
+        step += 1
+        xs.append(step)
+        ys.append(cum_rev)
         if done:
             break
     return np.array(xs), np.array(ys)
@@ -130,16 +130,16 @@ def main():
     # ── Plot ──────────────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(6.5, 4.5))
 
-    ax.step(x_lstm, y_lstm, where="post", color="#1f77b4", lw=2.0,
+    ax.plot(x_lstm, y_lstm, color="#1f77b4", lw=2.0,
             label=f"Rev-GNN-LSTM  (R={y_lstm[-1]:.0f})")
-    ax.step(x_im,   y_im,   where="post", color="#ff7f0e", lw=1.8, ls="--",
+    ax.plot(x_im,   y_im,   color="#ff7f0e", lw=1.8, ls="--",
             label=f"Rev-GNN-IM-RL (R={y_im[-1]:.0f})")
-    ax.step(x_gd,   y_gd,   where="post", color="#2ca02c", lw=1.8, ls="-.",
+    ax.plot(x_gd,   y_gd,   color="#2ca02c", lw=1.8, ls="-.",
             label=f"Greedy-Discount (Babaei et al. 2013) (R={y_gd[-1]:.0f})")
 
-    ax.set_xlabel("Number of Accepted Seed Nodes  $|S|$", fontsize=12)
+    ax.set_xlabel("Number of Buyers Offered  (episode step $t$)", fontsize=12)
     ax.set_ylabel("Cumulative Seller Revenue", fontsize=12)
-    ax.set_title("Revenue vs. Seed-Set Growth\n(FF-1000, seed=42)", fontsize=12)
+    ax.set_title("Revenue vs. Buyers Offered  (submodular curve, FF-1000 seed=42)", fontsize=12)
     ax.legend(fontsize=9, loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
