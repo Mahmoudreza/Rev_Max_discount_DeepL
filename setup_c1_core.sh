@@ -197,7 +197,7 @@ from src.evaluation.baselines import ie_strategy, greedy_discount
 from src.models.encoders.graphsage import GraphSAGEEncoder
 from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.training.imitation_trainer import ImitationTrainer
-from src.training.reinforce_trainer import ReinforceTrainer
+from src.training.reinforce_trainer import REINFORCETrainer
 from src.utils.features import compute_node_features
 print('C1 smoke test: ALL IMPORTS OK')
 "
