@@ -10,6 +10,13 @@ SKIP-never-reprice. Source: results/logs/budget_sweep_all_networks.json.
 "Rev-GNN-LSTM" here is the FF+BA-trained checkpoint
 (rev_gnn_lstm_densemix.pt, sha 0b549f93) — NOT the FF-trained released
 model, which has different numbers.
+
+Cal-DP values use OBSERVATION-ONLY calibration: acceptance rates are
+learned solely from the observed outcomes of simulated offers. The
+earlier oracle-calibrated variant, which queried true valuations, is
+superseded and must not be used in the paper.
+Calibration budget frozen at 5 passes x 5 simulations (commit
+328cf31); evaluation seeds [42,123,7], matching all other methods.
 """
 
 import os
@@ -24,31 +31,31 @@ DATA = {
     "polblogs (n=1222, avg deg 27.4)": {
         "IE-Strategy":     [178.2, 316.0, 386.3, 437.9, 498.0, 499.6],
         "Greedy-Discount": [ 50.4,  98.5, 139.4, 173.4, 254.9, 392.0],
-        "Cal-DP":          [ 96.1, 187.6, 347.1, 553.1, 648.7, 648.7],
+        "Cal-DP":          [ 86.8, 153.1, 315.0, 501.2, 607.9, 664.6],
         "Rev-GNN-LSTM":    [ 30.3,  79.1, 173.5, 488.7, 620.6, 620.6],
     },
     "FF-1000 (n=1000, avg deg 4.7)": {
         "IE-Strategy":     [ 84.1, 140.2, 170.4, 195.1, 245.6, 257.0],
         "Greedy-Discount": [ 52.5,  96.7, 345.7, 422.6, 448.3, 451.8],
-        "Cal-DP":          [317.9, 434.5, 443.7, 443.7, 443.7, 443.7],
+        "Cal-DP":          [281.2, 440.0, 448.7, 448.7, 448.7, 448.7],
         "Rev-GNN-LSTM":    [296.0, 385.9, 397.4, 399.7, 399.7, 399.7],
     },
     "Rice-Facebook (n=443, avg deg 44.3)": {
         "IE-Strategy":     [  0.9,   6.1,  63.5, 103.9, 141.9, 141.9],
         "Greedy-Discount": [  0.2,   0.2,   0.4,   1.1,   1.8,  10.7],
-        "Cal-DP":          [  0.8,   6.1, 156.2, 225.6, 225.7, 225.7],
+        "Cal-DP":          [  1.0,   5.1, 133.3, 226.7, 227.1, 227.1],
         "Rev-GNN-LSTM":    [  0.8,   2.9, 141.2, 214.1, 214.1, 214.1],
     },
     "Modular-FF (n=500, avg deg 16.6)": {
         "IE-Strategy":     [  0.9,   8.7,  42.9,  64.0, 105.8, 145.7],
         "Greedy-Discount": [  0.0,   0.4,   0.5,   3.2,   6.8,  28.1],
-        "Cal-DP":          [  1.3,  31.0,  80.7, 196.7, 227.4, 227.4],
+        "Cal-DP":          [  2.6,  64.7, 148.7, 186.3, 228.8, 228.8],
         "Rev-GNN-LSTM":    [  1.7,  35.3,  84.4, 169.5, 212.4, 212.4],
     },
     "FF-2000 (n=2000, avg deg 5.1)": {
         "IE-Strategy":     [141.9, 221.9, 283.0, 323.9, 412.1, 458.8],
         "Greedy-Discount": [ 35.1, 105.0, 178.4, 286.0, 675.3, 866.5],
-        "Cal-DP":          [710.7, 874.5, 905.6, 911.6, 911.6, 911.6],
+        "Cal-DP":          [531.8, 751.5, 795.4, 911.0, 911.0, 911.0],
         "Rev-GNN-LSTM":    [180.7, 691.3, 736.9, 830.1, 838.1, 838.1],
     },
 }
