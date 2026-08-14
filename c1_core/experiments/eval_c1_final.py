@@ -47,15 +47,12 @@ _REPO = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO))
 os.chdir(_REPO)
 
-from src.utils.helpers import load_config_with_base, set_seed, ensure_dir
+from src.utils.helpers import load_config_with_base, set_seed, ensure_dir, graph_to_pyg_data, get_available_mask
 from src.utils.logging import ExperimentLogger
-from src.evaluation.idea1_eval import (
-    load_lstm_policy, load_im_policy,
-    task1_robustness, task2_generalisation,
-    task3_nonmonotone, task4_ablation,
-)
+from src.evaluation.idea1_eval import load_lstm_policy, load_im_policy
 from src.evaluation.baselines import ie_strategy, mu_discount, greedy_discount, _make_env
 from src.env.graph_generators import generate_forest_fire, generate_modular_forest_fire, load_rice_facebook
+from src.utils.features import compute_static_features, build_graph_feature_cache, compute_node_features_fast
 
 # ── constants ────────────────────────────────────────────────────────────────
 LSTM_CKPT = "results/checkpoints/rev_gnn_lstm.pt"
@@ -118,18 +115,39 @@ def build_graph(network: str, seed: int, cfg):
 
 
 def run_policy_ep(policy, graph, cfg, device, seed: int, is_lstm: bool) -> float:
-    """Run one greedy episode; return total revenue."""
+    """Run one greedy episode using the same loop as _eval_lstm_detailed / _eval_im_detailed."""
     set_seed(seed)
-    env = _make_env(graph, cfg)
-    obs = env.reset()
-    if is_lstm:
-        policy.reset_lstm()
-    done = False
+    eval_dev = torch.device("cpu")   # always eval on CPU for determinism (matches idea1_eval)
+    policy.to(eval_dev)
+    static = compute_static_features(graph)
+    cache  = build_graph_feature_cache(graph, static)
+    n, nodes = graph.number_of_nodes(), list(graph.nodes())
+
     with torch.no_grad():
-        while not done:
-            feat = torch.FloatTensor(obs).unsqueeze(0).to(device)
-            action = policy.act(feat, deterministic=True)
-            obs, _, done, _ = env.step(action)
+        env = _make_env(graph, cfg)
+        env.reset()
+        if is_lstm:
+            policy.reset_episode(eval_dev)
+        for _ in range(n):
+            available = env.available_nodes
+            if not available:
+                break
+            feats = compute_node_features_fast(
+                cache=cache, S=frozenset(env.S), offered=frozenset(env.offered),
+                t=env.t, k=n, env=env,
+            )
+            data = graph_to_pyg_data(graph, feats, eval_dev)
+            mask = get_available_mask(n, frozenset(env.offered), nodes, eval_dev)
+            nidx, disc, _ = policy.select_and_price(data.x, data.edge_index, mask, greedy=True)
+            if nidx not in available:
+                nidx = available[0]
+            _, rew, done, _ = env.step(nidx, disc)
+            if is_lstm:
+                policy.update_sequence_state(disc, rew > 0, float(rew))
+            if done:
+                break
+
+    policy.to(device)   # restore original device
     return float(env.total_revenue)
 
 
