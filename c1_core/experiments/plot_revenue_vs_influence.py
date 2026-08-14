@@ -47,7 +47,7 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
     n, nodes = graph.number_of_nodes(), list(graph.nodes())
     xs, ys = [0], [0.0]
     cum_rev = 0.0
-    step = 0
+    accepted = 0
 
     with torch.no_grad():
         env = _make_env(graph, cfg)
@@ -68,10 +68,12 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
             if nidx not in available:
                 nidx = available[0]
             _, rew, done, _ = env.step(nidx, disc)
-            cum_rev += max(0.0, float(rew))
-            step += 1
-            xs.append(step)
-            ys.append(cum_rev)            # record EVERY step (submodular curve)
+            # Count ALL acceptances (rew > 0 = paid; env may also give disc=1.0 free seeds)
+            if rew >= 0 and nidx in env.S:   # node joined S → accepted (paid or free)
+                cum_rev += max(0.0, float(rew))
+                accepted += 1
+                xs.append(accepted)
+                ys.append(cum_rev)
             if is_lstm:
                 policy.update_sequence_state(disc, rew > 0, float(rew))
             if done:
@@ -81,27 +83,27 @@ def lstm_trajectory(policy, graph, cfg, is_lstm=True):
 
 
 def gd_trajectory_curve(graph, cfg):
-    """Run GD via env.step(); return (step_t, cum_revenue) at every step."""
+    """Run GD using trajectory's own revenue accounting (NOT env.step replay).
+
+    Uses greedy_discount_trajectory's marginal_gain field directly.
+    This faithfully reproduces the tier-based pricing:
+      Tier-0 (low influence) → price=0 → accepted=True but marginal_gain=0
+      Tier-1/2 → price>0 → accepted if true_val >= price → marginal_gain=price
+
+    X = accepted buyers count (one point per accepted step, like Babaei).
+    This shows the submodular shape: revenue grows fast (tier-2/1 early),
+    then flattens once only tier-0 free buyers remain.
+    """
     traj = greedy_discount_trajectory(graph, cfg)
-    env = _make_env(graph, cfg)
-    env.reset()
-    nodes = list(graph.nodes())
-    n = graph.number_of_nodes()
     xs, ys = [0], [0.0]
     cum_rev = 0.0
-    step = 0
+    accepted = 0
     for item in traj:
-        nidx, disc = item["node_idx"], item["discount"]
-        node = nodes[nidx] if nidx < n else nodes[0]
-        if node in env.offered:
-            continue
-        _, rew, done, _ = env.step(nidx, disc)
-        cum_rev += max(0.0, float(rew))
-        step += 1
-        xs.append(step)
-        ys.append(cum_rev)
-        if done:
-            break
+        if item["accepted"]:
+            cum_rev += float(item["marginal_gain"])  # 0 for tier-0, price for tier-1/2
+            accepted += 1
+            xs.append(accepted)
+            ys.append(cum_rev)
     return np.array(xs), np.array(ys)
 
 
@@ -137,9 +139,10 @@ def main():
     ax.plot(x_gd,   y_gd,   color="#2ca02c", lw=1.8, ls="-.",
             label=f"Greedy-Discount (Babaei et al. 2013) (R={y_gd[-1]:.0f})")
 
-    ax.set_xlabel("Number of Buyers Offered  (episode step $t$)", fontsize=12)
+    ax.set_xlabel("Number of Buyers Who Have Accepted  $|S|$", fontsize=12)
     ax.set_ylabel("Cumulative Seller Revenue", fontsize=12)
-    ax.set_title("Revenue vs. Buyers Offered  (submodular curve, FF-1000 seed=42)", fontsize=12)
+    ax.set_title("Revenue vs. Accepted Buyers  (FF-1000, seed=42)\n"
+                 "GD flattens (tier-0 free buyers) · LSTM grows (continuous pricing)", fontsize=10)
     ax.legend(fontsize=9, loc="upper left")
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
