@@ -57,10 +57,12 @@ if ! grep -q 'c1_core/checkpoints' .gitignore 2>/dev/null; then
   printf '\n# Allow C1 checkpoint copy\n!c1_core/checkpoints/*.pt\n' >> .gitignore
 fi
 
-# Helper: git mv if tracked, plain mv otherwise (with git add for dest)
+# Helper: git mv if tracked, plain mv otherwise (with git add for dest).
+# Idempotent: skips if source missing or destination already exists.
 safe_mv() {
   local src="$1" dst="$2"
-  [ -f "$src" ] || { return 0; }   # skip missing
+  [ -f "$src" ] || return 0   # source missing — skip
+  [ -f "$dst" ] && return 0   # dest already exists — skip (previous partial run)
   if git ls-files --error-unmatch "$src" &>/dev/null 2>&1; then
     git mv "$src" "$dst"
   else
