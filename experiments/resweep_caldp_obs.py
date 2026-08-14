@@ -65,8 +65,8 @@ def run_network(net, k_values, out_path):
                                           n_trials=N_TRIALS, n_sims=N_SIMS)
         r3 = dp_calibrated_v3_obs_budget(graph, cfg, B=B, c=C,
                                           n_trials=N_TRIALS, n_sims=N_SIMS)
-        v2  = float(r2["revenue"])
-        v3  = float(r3["revenue"])
+        v2  = float(r2["revenue"]["mean"])
+        v3  = float(r3["revenue"]["mean"])
         comp = max(v2, v3)
         elapsed = time.time() - t0
         print(f"  k={k:2d}  v2={v2:.2f}  v3={v3:.2f}  comp={comp:.2f}  ({elapsed:.0f}s)",
