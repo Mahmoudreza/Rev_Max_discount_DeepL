@@ -166,7 +166,13 @@ for f in budget_features.py budget_visualization.py dp_upgrade_visualization.py 
   safe_mv "src/utils/$f" "archive/src/utils/$f"
 done
 
-echo "=== git add new files ==="
+echo "=== Final staging: sweep archive/ and c1_core/ for files moved but not yet staged ==="
+# Files moved via 'mv' in a prior aborted run exist on disk but are untracked.
+# git add -f stages them, overriding any .gitignore rules.
+git add -f archive/  2>/dev/null || true
+git add -f c1_core/experiments/ 2>/dev/null || true
+
+echo "=== git add manifest + checkpoint ==="
 git add c1_core/__init__.py
 git add -f c1_core/checkpoints/rev_gnn_lstm.pt   # -f: override *.pt in .gitignore
 git add .gitignore                                # record the !c1_core/checkpoints exception
@@ -186,7 +192,7 @@ echo "=== Smoke test ==="
 python3 -c "
 import sys; sys.path.insert(0,'.')
 from src.env.revenue_env import RevenueEnv
-from src.env.graph_generators import make_forest_fire
+from src.env.graph_generators import generate_forest_fire
 from src.evaluation.baselines import ie_strategy, greedy_discount
 from src.models.encoders.graphsage import GraphSAGEEncoder
 from src.models.policies.sequential_joint_policy import SequentialJointPolicy

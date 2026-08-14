@@ -55,8 +55,7 @@ from src.evaluation.idea1_eval import (
     task3_nonmonotone, task4_ablation,
 )
 from src.evaluation.baselines import ie_strategy, mu_discount, greedy_discount, _make_env
-from src.env.graph_generators import make_forest_fire, make_modular_ff
-from src.env.polblogs_loader import load_polblogs
+from src.env.graph_generators import generate_forest_fire, generate_modular_forest_fire, load_rice_facebook
 
 # ── constants ────────────────────────────────────────────────────────────────
 LSTM_CKPT = "results/checkpoints/rev_gnn_lstm.pt"
@@ -84,23 +83,38 @@ def sha8(path: str) -> str:
     return h.hexdigest()[:8]
 
 
+# Default FF params (standard for all C1 experiments)
+_FF_P  = 0.37   # forward  burning probability
+_FF_PB = 0.32   # backward burning probability
+_MOD_SIZES     = [200, 300, 500]  # Modular_FF: 3 modules, 1000 nodes total
+_MOD_INTER     = 0.01             # inter-module edge probability
+_DATA_DIR      = "data/raw"       # Rice-FB data directory
+
+
 def build_graph(network: str, seed: int, cfg):
-    """Return (graph, label) for the requested network."""
-    n = cfg.graph.n
+    """Return nx.Graph for the requested network.
+
+    FF params are read from cfg if available; fall back to module defaults.
+    """
+    p          = getattr(getattr(cfg, "graph", None), "p",  _FF_P)
+    pb         = getattr(getattr(cfg, "graph", None), "pb", _FF_PB)
+    data_dir   = getattr(getattr(cfg, "data",  None), "data_dir", _DATA_DIR)
+
     if network == "FF_500":
-        g = make_forest_fire(500, cfg.graph.ff_m, seed=seed)
+        return generate_forest_fire(500,  p=p, pb=pb, seed=seed)
     elif network == "FF_1000":
-        g = make_forest_fire(1000, cfg.graph.ff_m, seed=seed)
+        return generate_forest_fire(1000, p=p, pb=pb, seed=seed)
     elif network == "FF_2000":
-        g = make_forest_fire(2000, cfg.graph.ff_m, seed=seed)
+        return generate_forest_fire(2000, p=p, pb=pb, seed=seed)
     elif network == "Modular_FF":
-        g = make_modular_ff(cfg.graph.modular_n, cfg.graph.modular_modules,
-                            cfg.graph.ff_m, seed=seed)
+        mod_sizes  = list(getattr(getattr(cfg, "graph", None), "module_sizes", _MOD_SIZES))
+        inter_prob = getattr(getattr(cfg, "graph", None), "inter_module_prob", _MOD_INTER)
+        return generate_modular_forest_fire(mod_sizes, p=p, pb=pb,
+                                            inter_prob=inter_prob, seed=seed)
     elif network == "Rice_FB":
-        g = load_polblogs(cfg.data.polblogs_path)   # Rice-FB = polblogs proxy
+        return load_rice_facebook(data_dir=data_dir)
     else:
         raise ValueError(f"Unknown network: {network}")
-    return g
 
 
 def run_policy_ep(policy, graph, cfg, device, seed: int, is_lstm: bool) -> float:
