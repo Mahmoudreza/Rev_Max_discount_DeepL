@@ -49,8 +49,11 @@ os.chdir(_REPO)
 
 from src.utils.helpers import load_config_with_base, set_seed, ensure_dir, graph_to_pyg_data, get_available_mask
 from src.utils.logging import ExperimentLogger
-from src.evaluation.idea1_eval import load_lstm_policy, load_im_policy
-from src.evaluation.baselines import ie_strategy, mu_discount, greedy_discount, _make_env
+from src.evaluation.idea1_eval import load_lstm_policy, load_im_policy, _eval_greedy_discount
+from src.evaluation.baselines import ie_strategy, mu_discount, _make_env
+# NOTE: do NOT use greedy_discount() from baselines — it gives ~464 (inflated).
+# Use _eval_greedy_discount from idea1_eval which gives ~418 and matches
+# paper_gen_updated.json (GD=417.7 for FF_1000 seed=42).
 from src.env.graph_generators import generate_forest_fire, generate_modular_forest_fire, load_rice_facebook
 from src.utils.features import compute_static_features, build_graph_feature_cache, compute_node_features_fast
 
@@ -184,9 +187,9 @@ def run_shard(shard_id: int, cfg, device, lstm_policy, im_policy,
     graph_p1 = build_graph(network, SEED_P1, cfg)
     lstm_p1  = run_policy_ep(lstm_policy, graph_p1, cfg, device, SEED_P1, is_lstm=True)
     im_p1    = run_policy_ep(im_policy,   graph_p1, cfg, device, SEED_P1, is_lstm=False)
-    ie_p1    = run_baseline_ep(ie_strategy,    graph_p1, cfg, SEED_P1)
-    mu_p1    = run_baseline_ep(mu_discount,    graph_p1, cfg, SEED_P1)
-    gd_p1    = run_baseline_ep(greedy_discount, graph_p1, cfg, SEED_P1)
+    ie_p1    = run_baseline_ep(ie_strategy,        graph_p1, cfg, SEED_P1)
+    mu_p1    = run_baseline_ep(mu_discount,         graph_p1, cfg, SEED_P1)
+    gd_p1    = run_baseline_ep(_eval_greedy_discount, graph_p1, cfg, SEED_P1)
     print(f"  P1 seed42: LSTM={lstm_p1:.2f}  IM={im_p1:.2f}  "
           f"IE={ie_p1:.2f}  µ={mu_p1:.2f}  GD={gd_p1:.2f}")
 
@@ -196,9 +199,9 @@ def run_shard(shard_id: int, cfg, device, lstm_policy, im_policy,
         g = build_graph(network, s, cfg)
         lstm_p2_raw.append(run_policy_ep(lstm_policy, g, cfg, device, s, True))
         im_p2_raw.append(run_policy_ep(im_policy,   g, cfg, device, s, False))
-        ie_p2_raw.append(run_baseline_ep(ie_strategy,     g, cfg, s))
-        mu_p2_raw.append(run_baseline_ep(mu_discount,     g, cfg, s))
-        gd_p2_raw.append(run_baseline_ep(greedy_discount, g, cfg, s))
+        ie_p2_raw.append(run_baseline_ep(ie_strategy,             g, cfg, s))
+        mu_p2_raw.append(run_baseline_ep(mu_discount,              g, cfg, s))
+        gd_p2_raw.append(run_baseline_ep(_eval_greedy_discount,    g, cfg, s))
     lstm_p2m = sum(lstm_p2_raw)/5; lstm_p2s = math.sqrt(sum((x-lstm_p2m)**2 for x in lstm_p2_raw)/4)
     gd_p2m   = sum(gd_p2_raw)/5
     print(f"  P2 5-seed: LSTM={lstm_p2m:.2f}±{lstm_p2s:.2f}  GD={gd_p2m:.2f}  "
@@ -212,7 +215,7 @@ def run_shard(shard_id: int, cfg, device, lstm_policy, im_policy,
             g = build_graph("FF_1000", s, cfg)
             lstm_p3_raw.append(run_policy_ep(lstm_policy, g, cfg, device, s, True))
             im_p3_raw.append(run_policy_ep(im_policy,   g, cfg, device, s, False))
-            gd_p3_raw.append(run_baseline_ep(greedy_discount, g, cfg, s))
+            gd_p3_raw.append(run_baseline_ep(_eval_greedy_discount, g, cfg, s))
         lstm_p3m = sum(lstm_p3_raw)/20; lstm_p3s = math.sqrt(sum((x-lstm_p3m)**2 for x in lstm_p3_raw)/19)
         im_p3m   = sum(im_p3_raw)/20;   im_p3s   = math.sqrt(sum((x-im_p3m)**2   for x in im_p3_raw)/19)
         gd_p3m   = sum(gd_p3_raw)/20
