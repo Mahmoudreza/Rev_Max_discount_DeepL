@@ -1,0 +1,33 @@
+% paper/sections/conclusion.tex
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented Rev-GNN-LSTM, the first end-to-end learned policy for joint seed
+selection and personalized pricing in social networks.
+By coupling a GraphSAGE encoder with an LSTM episode-history module and training
+via imitation learning followed by REINFORCE, the model captures the joint
+dependency between targeting and pricing decisions that hand-crafted baselines
+ignore.
+On Forest-Fire $n{=}1000$ the model achieves $462.6$ revenue versus $460.0$
+for the best hand-crafted baseline ($p{<}0.0001$, $20/20$ seeds), %SOURCE: CLAUDE.md
+and generalizes zero-shot to unseen network sizes and topologies.
+
+We further introduced a budget-constrained formulation — production cost and
+replenishable capital — that transforms the problem into a sequential knapsack
+with network externalities.
+A family of calibrated dynamic-programming baselines (Cal-DP v2, v3, composite)
+dominates the prior standard at every budget level tested.
+The learned policy excels in the capital-binding regime ($k \le 5$, up to $41\times$
+vs.\ Greedy+Budget at $k{=}1$), while Cal-DP leads at mid-$k$ on dense real
+networks — a finding we report as a honest regime-aware conclusion.
+
+\paragraph{Future work.}
+Direct extensions include (i) training the budget-constrained policy on denser
+graphs closer to real social networks; (ii) replacing the Rayleigh valuation model
+with a learned model calibrated from observed purchase histories;
+(iii) extending to multi-item assortment settings where each buyer chooses from
+a menu; and (iv) applying the framework to decentralized recommendations where
+the ``seller'' is a platform and seeds are content creators.
+The formalization of revenue maximization as an RL problem opens a path toward
+data-driven market design at social-network scale.

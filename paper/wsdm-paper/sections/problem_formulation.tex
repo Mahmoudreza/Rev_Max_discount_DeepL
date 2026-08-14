@@ -1,0 +1,115 @@
+% paper/sections/problem_formulation.tex
+% §3.1 Babaei (2013) unconstrained formulation
+% §3.2 Our budget-constrained extension
+
+\section{Problem Formulation}
+\label{sec:problem}
+
+We formalize two variants of the revenue maximization problem:
+the unconstrained variant of \citet{babaei2013revenue} and our
+budget-constrained extension.
+
+\subsection{Unconstrained Revenue Maximization}
+\label{sec:babaei}
+
+Revenue maximization exploits the fact that social influence raises a buyer's
+willingness-to-pay.
+
+\begin{definition}[Influence Network]
+Let $G = (\calV, \calE)$ be a directed weighted graph with edge weights
+$w_{ij} \in [0,2]$ drawn independently from $\mathrm{Uniform}(0,2)$,
+representing the influence strength of buyer $j$ on buyer $i$.
+\end{definition}
+
+\begin{definition}[Valuation]
+Given seed set $\St \subseteq \calV$, the \emph{normalized influence} on buyer
+$i$ is
+\[
+  x_i(\St) = \frac{\sum_{j \in \St \cup \{i\}} w_{ij}}{\sum_{k \in \calV} w_{ik}},
+\]
+and the \emph{valuation} (willingness-to-pay) of buyer $i$ is
+$\val_i(\St) = f\!\left(2 x_i(\St)\right)$,
+where $f$ is the Rayleigh CDF: $f(y) = (y/b^2)\exp(-y^2/2b^2)$, $b=1$.
+The monotone variant clips $f$ to be non-decreasing (used for Forest-Fire graphs);
+the non-monotone variant uses the raw Rayleigh PDF (used for Rice-Facebook).
+\end{definition}
+
+\begin{definition}[Offer and Acceptance]
+At step $t$ the seller presents buyer $v^* \notin \St$ with price
+$p_t = \val_{v^*}(\St) \cdot (1 - d_t)$, where $d_t \in [0,1]$ is the discount.
+Buyer $v^*$ accepts if $p_t \le \val_{v^*}(\St)$
+(equivalently, always accepts since $p_t \le \val_{v^*}(\St)$ by construction).
+In practice we model stochastic acceptance: $v^*$ accepts with probability
+$p_t / \val_{v^*}(\St) = 1 - d_t$ when the seller does not know the exact
+weight realization and uses 200 Monte Carlo samples to estimate
+$\hat{\val}_{v^*}(\St)$.
+\end{definition}
+
+Revenue from step $t$ is $r_t = p_t \cdot \mathbf{1}[\text{accepted}]$.
+The seller's objective is:
+
+\begin{problem}[Unconstrained Revenue Maximization]\label{prob:uncon}
+Choose a sequence of buyers $v_1, \ldots, v_n$ and discounts $d_1, \ldots, d_n$
+to maximize total revenue $R = \sum_{t=1}^{n} r_t$,
+over all $n = |\calV|$ sequential offers.
+\end{problem}
+
+\noindent
+The key difficulty is the \emph{joint coupling}: the revenue-optimal discount for
+$v^*$ at step $t$ depends on the current influence $x_{v^*}(\St)$, which depends on
+which buyers accepted in steps $1, \ldots, t-1$.
+\citet{babaei2013revenue} ignore this coupling; we learn it end-to-end.
+
+\subsection{Budget-Constrained Revenue Maximization}
+\label{sec:budget}
+
+Budget constraints transform seed selection into a sequential knapsack with
+network externalities.
+
+\begin{definition}[Production Cost and Capital]
+The seller starts with capital $B_0 = k \cdot c$ for a given
+\emph{initial target count} $k$ and unit production cost $c > 0$.
+Each offer costs $c$ regardless of acceptance; successful sales replenish the
+budget by the accepted price $p_t$.
+The budget after step $t$ is:
+\[
+  B_{t} = B_{t-1} - c + r_t.
+\]
+\end{definition}
+
+\begin{definition}[Bankruptcy]
+The seller goes bankrupt at the first step $t$ for which $B_t < c$.
+Once bankrupt, no further offers can be made.
+\end{definition}
+
+\begin{problem}[Budget-Constrained Revenue Maximization]\label{prob:budget}
+Maximize total revenue $R = \sum_t r_t$ subject to solvency: $B_t \ge 0$ for all $t$.
+\end{problem}
+
+\noindent
+Problem~\ref{prob:budget} strictly generalizes Problem~\ref{prob:uncon}:
+as $c \to 0$ the constraint becomes vacuous.
+With finite $c$, the policy must balance two competing effects.
+\begin{itemize}[leftmargin=*,topsep=2pt,itemsep=0pt]
+  \item \emph{Deep discounts} increase acceptance probability and revenue per step,
+    replenishing the budget for future offers.
+  \item \emph{Shallow discounts} (high prices) yield larger revenue per accepted
+    buyer but risk rejection, draining the budget without replenishment.
+\end{itemize}
+Skipping low-value buyers (those unlikely to accept at a profitable price) becomes
+a legitimate strategy to preserve budget for high-value opportunities later —
+a decision that is NP-hard to optimize globally~\citep{papadimitriou1994complexity}.
+
+\paragraph{Regime characterization.}
+Let $k$ be the initial target count and $c = 0.3$ (our experimental setting).
+The budget $B_0 = kc$ spans three qualitatively different regimes:
+\begin{enumerate}[leftmargin=*,topsep=2pt,itemsep=0pt]
+  \item \emph{Capital-binding} ($k \le 5$, $B_0 \le 1.5$):
+    a single rejection can cause bankruptcy; skip decisions dominate.
+  \item \emph{Transitional} ($6 \le k \le 15$, $1.8 \le B_0 \le 4.5$):
+    skipping is beneficial but not mandatory; rich solution landscape.
+  \item \emph{Budget-slack} ($k \ge 20$, $B_0 \ge 6.0$):
+    capital rarely binds; the problem reduces approximately to the unconstrained
+    variant.
+\end{enumerate}
+Our algorithms are evaluated across all three regimes (§\ref{sec:exp_budget}).

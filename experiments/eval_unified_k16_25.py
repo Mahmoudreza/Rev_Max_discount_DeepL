@@ -113,8 +113,8 @@ def main():
     pol.eval()
     pol  = pol.to(device)
 
-    # Fixed FF graph (same graph as specialist eval: n=1000, p=0.37, pb=0.32, seed=0)
-    graph = generate_forest_fire(1000, 0.37, 0.32, seed=0)
+    # Fixed FF graph: same seed as run_unified_sweep.py (seed=42, NOT seed=0)
+    graph = generate_forest_fire(1000, 0.37, 0.32, seed=42)
     print(f"Graph: FF n={graph.number_of_nodes()} edges={graph.number_of_edges()}")
 
     results = {}

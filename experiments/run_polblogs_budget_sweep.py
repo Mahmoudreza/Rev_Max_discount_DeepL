@@ -154,13 +154,13 @@ def eval_caldp(graph, k):
     B   = k * C
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=0, weight_high=WEIGHT_HIGH)
     try:
-        r2 = dp_calibrated_v2_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIM)
+        r2 = dp_calibrated_v2_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS)
         m2 = float(r2.get("revenue", {}).get("mean", r2.get("mean", 0.0)))
     except Exception as e:
         print(f"  Cal-DP v2 k={k} error: {e}")
         m2 = 0.0
     try:
-        r3 = dp_calibrated_v3_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIM)
+        r3 = dp_calibrated_v3_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS)
         m3 = float(r3.get("revenue", {}).get("mean", r3.get("mean", 0.0)))
     except Exception as e:
         print(f"  Cal-DP v3 k={k} error: {e}")

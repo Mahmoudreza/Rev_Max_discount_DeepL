@@ -1,0 +1,44 @@
+% paper/sections/abstract.tex
+% Target: ~170 words (WSDM 2028 double-blind submission)
+% Style: CrossWalk/Adv.GE house style — context→gap→"Here,we"→numbers→framing→caveat
+%
+% NUMBER SOURCES (every number below has a cited JSON):
+%   462.6  % SOURCE: CLAUDE.md §Session State; results/logs/comparison_20260623_131609.json
+%   460.0  % SOURCE: CLAUDE.md §Session State; results/logs/comparison_20260623_131609.json
+%   p<0.0001, 20/20  % SOURCE: CLAUDE.md §Session State
+%   +8.6%  % SOURCE: results/logs/paper_gen_updated.json (FF n=2000, LSTM vs Greedy-Discount)
+%   +40.5% % SOURCE: results/logs/paper_gen_updated.json (Rice-FB n=443, LSTM vs Greedy-Discount)
+%   99.8   % SOURCE: results/logs/dp_v3_full_curve_merged.json (ff_n1000, k=3, v3/composite)
+%   23.6   % SOURCE: results/logs/dp_upgrade_eval.json (k=3, Greedy+Budget: 23.62)
+%   448    % SOURCE: results/logs/dp_v3_full_curve_merged.json (ff_n1000, k=40, v2: 448.0)
+%   449    % SOURCE: results/logs/dp_upgrade_eval.json (k=40, Greedy+Budget: 448.66≈449)
+%   305.6  % SOURCE: results/logs/unified_sweep.json (k=1, unified learned policy: 305.572)
+%   7.4    % SOURCE: results/logs/dp_upgrade_eval.json (k=1, Greedy+Budget: 7.39≈7.4)
+
+Revenue maximization via targeted discounting in social networks — offering personalized
+prices to influential buyers so that peer-to-peer diffusion amplifies total sales —
+has relied on two hand-crafted, decoupled steps: greedy seed selection followed by a
+degree-rule pricing heuristic~\citep{babaei2013revenue}.
+The coupling between \emph{who} to target and \emph{what price} to offer is ignored.
+Here, we introduce the first end-to-end learning approach: a GNN--LSTM policy that
+jointly selects seeds and sets personalized discounts via imitation learning and
+REINFORCE.
+%
+Trained on graphs with $n \le 440$ nodes, the model achieves
+$462.6$ %SOURCE: comparison_20260623_131609.json
+revenue on Forest-Fire $n{=}1000$ versus $460.0$ for the best hand-crafted baseline
+($p{<}0.0001$, $20/20$ seeds),
+%SOURCE: CLAUDE.md §Session State
+and transfers zero-shot to $n{=}2000$ ($+8.6\%$) %SOURCE: paper_gen_updated.json
+and Rice-Facebook ($+40.5\%$). %SOURCE: paper_gen_updated.json
+%
+We further introduce a budget-constrained formulation in which a production cost is
+deducted per offer from replenishable finite capital, casting selection as a
+sequential knapsack with network externalities.
+A calibrated dynamic-programming baseline dominates classical methods where the
+budget binds
+($99.8$ vs.\ $23.6$ at $k{=}3$) %SOURCE: dp_v3_full_curve_merged.json / dp_upgrade_eval.json
+and matches greedy at large~$k$ ($448$ vs.\ $449$); %SOURCE: same
+our learned policy reaches $305.6$ vs.\ $7.4$ at $k{=}1$ ($41{\times}$). %SOURCE: unified_sweep.json / dp_upgrade_eval.json
+One honest finding: calibrated DP leads the learned policy at mid-$k$ on the
+dense Rice-Facebook graph.

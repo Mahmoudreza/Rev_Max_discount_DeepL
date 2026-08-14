@@ -111,3 +111,5 @@ All Idea-3 budget checkpoints use 21-dim input (vs 20-dim for Idea-1):
 | 2026-08-09 00:02 | rev_gnn_lstm_largek_p1.pt | sha256=39e3e373dcce33ca... | large-k specialist, warm-start from ep200 unified |
 
 | 2026-08-09 02:32 | rev_gnn_lstm_largek.pt | sha256=3033620abaf2d728... | large-k specialist, warm-start from ep200 unified |
+c1_ffba_50_50_p1_ep1.pt  sha=aa925a24  epoch=1  loss=4.4052
+c1_ffba_2to1_p1_ep1.pt  sha=bb8db637  epoch=1  loss=4.4150

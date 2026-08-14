@@ -1,0 +1,68 @@
+% paper/sections/related_work.tex
+% Style: [Author et al., year] showed/proposed... 1-2 sentences each.
+%        Gap introduced by "However," or "Yet,".
+
+\section{Related Work}
+\label{sec:related}
+
+Revenue maximization in social networks builds on three lines of research:
+influence maximization, mechanism design for network markets, and deep RL on graphs.
+
+\paragraph{Influence maximization.}
+\citet{kempe2003maximizing} formulated seed-set selection under the Independent
+Cascade and Linear Threshold models, proving a $(1 - 1/e)$-approximation via
+greedy hill climbing.
+Subsequent work scaled this to large graphs through lazy evaluations, sketching,
+and diffusion simulations~\citep{goyal2011celf++,tang2014influence,tang2015influence}.
+\citet{dai2017learning} introduced S2V-DQN, where a structure2vec GNN produces
+node embeddings and a DQN selects seeds; this line was extended to
+ToupleGDD~\citep{touplegdd}, which uses graph attention and policy
+gradients to achieve state-of-the-art spread on large networks.
+Fair variants of influence maximization~\citep{fish2019gaps,tsang2019group}
+restrict seed selection to satisfy demographic constraints;
+\citet{khajehnejad2022crosswalk} reweight random-walk probabilities to equalize
+cross-group diffusion.
+However, all of these methods maximize \emph{spread}, not \emph{revenue}, and
+assume zero production cost and no pricing structure.
+
+\paragraph{Revenue maximization in networks.}
+\citet{babaei2013revenue} showed that a seller can collect strictly more revenue by
+offering personalized discounts rather than giving items free, because a buyer's
+willingness-to-pay increases as more of her contacts purchase.
+Their algorithm selects seeds greedily by degree and assigns prices via a hand-crafted
+degree rule (the $\mu$-discount), keeping selection and pricing independent.
+Subsequent work by \citet{singer2012win} and \citet{hartline2008optimal} studied
+pricing in cascade models under different information assumptions, but focused on
+optimal single-item auctions rather than sequential joint policies.
+\citet{kempe2014maximizing} extended the revenue framework to general buyer
+valuations, but again with decoupled seed selection and pricing.
+We are the first to learn a joint policy end-to-end.
+
+\paragraph{Graph neural networks for combinatorial optimization.}
+\citet{khalil2017learning} used GNNs with policy gradients to solve graph
+combinatorial problems such as Minimum Vertex Cover and Traveling Salesman.
+\citet{ding2020erdos} combined GNNs with REINFORCE for the Maximum Cut problem.
+Our work applies the same graph RL paradigm to the continuous-discrete joint action
+$(v^*, d_t)$ of seed selection and personalized discount, with the additional
+complexity of a valuation model that depends on the current seed set.
+
+\paragraph{Sequential pricing and mechanism design.}
+The posted-price mechanism literature~\citep{blumrosen2011posted,roughgarden2012supply}
+studies how a seller sets prices for buyers arriving in sequence; revenue maximization
+in this setting is studied under various buyer-arrival
+models~\citep{chawla2010multi}.
+Budget-limited influence maximization has been studied in the context of
+advertising~\citep{nguyen2013budget,zhang2016maximizing}, but the budget there
+limits the \emph{number} of seeds rather than the capital available for production.
+Our formulation introduces a \emph{replenishable} budget that grows with accepted
+sales, which to our knowledge has not appeared in prior work.
+
+\paragraph{LSTM and Transformer for sequential optimization.}
+Sequence models have been applied to combinatorial routing via pointer
+networks~\citep{vinyals2015pointer} and to vehicle routing with
+transformers~\citep{kool2019attention}.
+\citet{chen2019learning} combined GNNs with LSTMs for local search on combinatorial
+problems.
+We use an LSTM to carry the episode history (past offers, acceptances, running revenue)
+across steps, providing the policy with a compressed summary of how the network
+responds to pricing, information that a stateless GNN cannot access.

@@ -13,6 +13,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import networkx as nx
+_orig_bc = nx.betweenness_centrality
+nx.betweenness_centrality = lambda G,normalized=True,**kw: _orig_bc(G,k=min(200,G.number_of_nodes()),normalized=normalized,**kw)
+
 from src.env.graph_generators import generate_forest_fire
 from src.env.budget_revenue_env import BudgetEnvConfig
 from src.evaluation.budget_baselines import greedy_discount_budget

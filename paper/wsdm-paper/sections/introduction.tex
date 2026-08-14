@@ -1,0 +1,128 @@
+% paper/sections/introduction.tex
+% Target: 0.9–1.1 pages (sigconf two-column ≈ 700–900 words body text)
+% Style: WSDM framing — network economics first, learning as instrument.
+%        Structure: P1 viral marketing+Babaei | P2 deep-IM gap (1 sentence) |
+%                   P3 our approach | P4 budget realism | P5 C1–C4 bullets | P6 roadmap
+% Every number has a %SOURCE comment. Phrases follow style_notes.md.
+%
+% ANONYMIZATION: cite WSDM 2027 prior work as \cite{anon_wsdm27}.
+%
+% NUMBER SOURCES:
+%   462.6 / 460.0   % SOURCE: CLAUDE.md; results/logs/comparison_20260623_131609.json
+%   p<0.0001 20/20  % SOURCE: CLAUDE.md §Session State
+%   +8.6% n=2000    % SOURCE: results/logs/paper_gen_updated.json (FF n=2000)
+%   +40.5% Rice-FB  % SOURCE: results/logs/paper_gen_updated.json (Rice-FB n=443)
+%   99.8 / 23.6 k=3 % SOURCE: dp_v3_full_curve_merged.json / dp_upgrade_eval.json
+%   305.6 / 7.4 k=1 % SOURCE: unified_sweep.json / dp_upgrade_eval.json
+
+\section{Introduction}
+\label{sec:intro}
+
+% ── P1: Viral marketing + discounting + Babaei ────────────────────────────────
+A firm selling a product through a social network faces a classical tension:
+deep discounts convert hesitant buyers and trigger peer-to-peer
+diffusion,  but they erode margin on every unit sold.
+\citet{babaei2013revenue} formalized this trade-off as a
+\emph{revenue maximization via discounting} problem: the seller sequentially
+targets a set of buyers and offers each a personalized price, exploiting the
+fact that a buyer's willingness-to-pay rises as more of her social contacts
+have already purchased.
+Their framework showed that calibrated discounts strictly dominate the
+free-seeding paradigm of classical influence maximization~\citep{kempe2003maximizing}
+in terms of total revenue.
+The practical limitation is that they rely on two independent, hand-crafted
+steps — greedy seed selection by degree centrality, then discount assignment via a
+simple degree rule — designed separately and applied in sequence.
+The coupling between \emph{which} buyer to target next and
+\emph{what price} to offer is never exploited.
+
+% ── P2: Deep IM gap (one sentence) ───────────────────────────────────────────
+Deep reinforcement learning for influence maximization — notably
+S2V-DQN~\citep{dai2017learning} and ToupleGDD~\citep{touplegdd} — achieves
+strong results on the seed-selection subproblem but optimizes
+\emph{diffusion reach}, not revenue, and assumes zero production cost and no pricing
+decisions.
+
+% ── P3: Our approach ─────────────────────────────────────────────────────────
+Here, we close both gaps.
+We extend the graph RL framework of our prior work~\citep{anon_wsdm27} to the
+joint seed-and-pricing problem.
+At each decision step a two-layer GraphSAGE encoder produces node embeddings
+that capture both structural centrality and the current influence state of
+every buyer.
+An LSTM then compresses the full episode history — past offers, accept/reject
+outcomes, running revenue — into a context vector that is concatenated with
+the per-node embedding before scoring.
+A~joint policy head then selects the next buyer (discrete) and outputs a
+personalized discount $d_t \in [0,1]$ (continuous), trained first by imitation
+of the \citet{babaei2013revenue} greedy expert and then refined by REINFORCE.
+Trained only on Forest-Fire graphs with $n \le 440$ nodes, the model achieves
+$462.6$ %SOURCE: CLAUDE.md; comparison_20260623_131609.json
+revenue on the standard $n{=}1000$ test graph versus $460.0$ for the best
+hand-crafted baseline ($p{<}0.0001$, %SOURCE: CLAUDE.md §Session State
+$20/20$ seeds).
+Zero-shot generalization: $+8.6\%$ at $n{=}2000$ %SOURCE: paper_gen_updated.json
+and $+40.5\%$ on Rice-Facebook. %SOURCE: paper_gen_updated.json
+
+% ── P4: Realism gap → budget formulation ─────────────────────────────────────
+A second limitation of all prior work — including the unconstrained model
+above — is the assumption of infinite capital: the firm can approach any buyer
+at any cost.
+In practice, a seller starts with finite budget $B_0 = k \cdot c$ and incurs a
+unit production cost $c$ for \emph{every} offer, whether or not the buyer
+accepts; successful sales replenish the budget.
+This transforms seed selection into a \emph{sequential knapsack with network
+externalities}: the policy must reason jointly about which buyers to skip,
+in what order to approach them, and what price to offer, all under a live
+cash-flow constraint.
+We formalize this budget-constrained variant, introduce a
+\emph{calibrated dynamic-programming} (Cal-DP) baseline that adapts classical
+DP to replenishable-capital settings, and train a budget-aware learned policy
+via imitation on Cal-DP trajectories followed by REINFORCE.
+
+% ── P5: Contribution bullets C1–C4 ───────────────────────────────────────────
+\smallskip
+\noindent\textbf{Contributions.}
+\begin{enumerate}[label=\textbf{C\arabic*.}, leftmargin=*, topsep=2pt,
+                  itemsep=1pt, parsep=0pt]
+
+  \item \textbf{Joint learning for revenue maximization.}
+    We introduce the first end-to-end model for joint seed selection and
+    personalized pricing in social networks.
+    On Forest-Fire $n{=}1000$, the GNN+LSTM policy achieves
+    $462.6$ %SOURCE: CLAUDE.md; comparison_20260623_131609.json
+    vs.\ $460.0$ for the Babaei greedy baseline
+    ($p{<}0.0001$, $20/20$ seeds). %SOURCE: CLAUDE.md §Session State
+
+  \item \textbf{Zero-shot size and network generalization.}
+    Trained on $n \le 440$, the model transfers without retraining to
+    $n{=}2000$ ($+8.6\%$) %SOURCE: paper_gen_updated.json
+    and to the real Rice-Facebook graph ($+40.5\%$), %SOURCE: paper_gen_updated.json
+    demonstrating that the GNN+LSTM inductive bias learns
+    topology-agnostic pricing strategies.
+
+  \item \textbf{Budget-constrained formulation.}
+    We formalize revenue maximization under replenishable finite capital as a
+    sequential knapsack with network externalities, a practically
+    relevant variant absent from prior work.
+
+  \item \textbf{Calibrated DP + learned policy for the budget regime.}
+    Our Cal-DP baseline achieves $99.8$ vs.\ $23.6$ for classical Greedy+Budget
+    at $k{=}3$ ($4.2{\times}$); %SOURCE: dp_v3_full_curve_merged.json / dp_upgrade_eval.json
+    the learned policy reaches $305.6$ vs.\ $7.4$ at $k{=}1$ ($41{\times}$). %SOURCE: unified_sweep.json / dp_upgrade_eval.json
+    One honest finding: Cal-DP leads the learned policy at mid-$k$ on the
+    dense Rice-Facebook graph — a result we report transparently as a
+    regime-aware conclusion.
+
+\end{enumerate}
+
+% ── P6: Roadmap ───────────────────────────────────────────────────────────────
+\smallskip
+\noindent\textbf{Paper organization.}
+\S\ref{sec:related} surveys related work.
+\S\ref{sec:problem} formalizes unconstrained (\S\ref{sec:babaei}) and
+budget-constrained (\S\ref{sec:budget}) revenue maximization.
+\S\ref{sec:method} describes the GNN+LSTM model, training procedure, and
+Cal-DP baseline.
+\S\ref{sec:experiments} reports experimental results and the regime map.
+\S\ref{sec:conclusion} concludes with limitations and future directions.

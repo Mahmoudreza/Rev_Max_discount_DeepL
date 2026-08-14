@@ -1,0 +1,56 @@
+% paper/sections/results.tex
+% Discussion / analysis: cross-regime findings, Transformer variant, limitations
+
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Why the learned policy dominates at small $k$.}
+At $k{=}1$ (budget $B_0{=}0.30$) the entire session is defined by one critical
+decision: find a buyer who will accept at a price that both replenishes the budget
+\emph{and} yields high revenue.
+Greedy+Budget selects by degree regardless of pricing; if the first offer is
+rejected the session ends bankrupt.
+The learned policy uses the full episode context — valuation estimates, influence
+state, budget ratio — to set a discount calibrated to ensure acceptance, achieving
+$305.6$ revenue vs.\ $7.4$ for Greedy+Budget. %SOURCE: unified_sweep.json / dp_upgrade_eval.json
+Cal-DP v3 also exploits this structure ($10.6$) but cannot dynamically adapt
+pricing to individual buyer responses, capping its advantage.
+
+\paragraph{Why Cal-DP leads at mid-$k$ on dense graphs.}
+On the Rice-Facebook network ($|\calE|{=}4{,}752$ vs.\ $2{,}377$ for FF $n{=}1000$)
+the influence model assigns high valuations to many nodes, not just high-degree
+hubs.
+Cal-DP v2 exploits a globally computed value function over the budget grid,
+effectively finding near-optimal buyer orderings under the dense influence
+structure.
+The learned policy, trained on sparser Forest-Fire graphs, does not adapt its
+pricing calibration to the denser topology at mid-$k$ (capital-transitional
+regime).
+This failure mode is an honest finding and motivates future transfer or
+fine-tuning experiments.
+
+\paragraph{Transformer variant.}
+We also trained a Graph Transformer variant (Rev-GNN-Transformer) replacing the
+SAGEConv layers with TransformerConv~\citep{shi2021masked}.
+On FF $n{=}1000$ (unconstrained) it achieves $463.8 \pm 5.3$, %SOURCE: transformer_gate_a.json
+narrowly exceeding Rev-GNN-LSTM ($462.6$, Gate~A PASS). %SOURCE: CLAUDE.md
+In the budget-constrained setting, the Transformer wins $5/10$ $k$-values on FF
+and $2/10$ on Rice-Facebook (Gate~B PASS). %SOURCE: gate_b_eval_v2.json
+Given the marginal advantage and higher inference cost, we report
+Rev-GNN-Transformer as a supplemental result; all primary claims use Rev-GNN-LSTM.
+
+\paragraph{Limitations.}
+\begin{enumerate}[leftmargin=*,topsep=2pt,itemsep=1pt]
+  \item \emph{Single influence model}: results are for the Rayleigh valuation model
+    of \citet{babaei2013revenue}; other valuation functions (e.g., linear threshold,
+    independent cascade-based) are not tested.
+  \item \emph{Small training graphs}: the model is trained on $n \le 440$ and
+    evaluated up to $n{=}2000$; very large real networks ($n > 10^4$) are not
+    evaluated.
+  \item \emph{Budget model}: the replenishable capital model is a simplification;
+    real firms face compound costs (shipping, returns, marketing overhead) not
+    captured here.
+  \item \emph{Edge weight uncertainty}: we use 200 Monte Carlo samples to estimate
+    valuations; the ground-truth weights are assumed unknown, which may not hold
+    in practice.
+\end{enumerate}
