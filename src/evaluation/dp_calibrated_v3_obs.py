@@ -1,12 +1,15 @@
 """src/evaluation/dp_calibrated_v3_obs.py — Cal-DP v3 (observation-only calibration).
 
 Identical to dp_calibrated_v3.py EXCEPT the calibration loop never calls
-_true_valuation.  Acceptance is observed from env.step() only, exactly as a
-real seller would observe it.
+_true_valuation.  Acceptance is observed from env.step() only.
 
-Tier rotation: node k in sim s uses tier index (s*n+k) % n_tiers, giving
-~uniform coverage of all tiers over 30 sims.  A cells are updated only for
-the tier that was actually simulated.  V cells (est_val) are unchanged.
+Observation matching: 5 passes × n_sims campaigns, one dedicated pass per
+discount tier (tiers=[1.0,0.8,0.5,0.2,0.0]).  Total offers = 5×n_sims×n,
+identical to the oracle version's 5 labels per buyer per campaign.
+
+Empty cells filled by monotone interpolation along the tier axis (A is
+non-increasing in price), then nearest-neighbour fill along cls/sb axes.
+No uninformative 0.5 prior.
 
 Planning and execution are imported directly from dp_calibrated_v3.
 """
@@ -53,11 +56,11 @@ def calibrate_v3_obs_table(
     n = graph.number_of_nodes()
     os.makedirs(_CACHE_DIR, exist_ok=True)
     gh = _graph_hash(graph)
+    # Cache key "_5pass": 5 dedicated tier passes × n_sims (150k total offers)
     cache = os.path.join(
         _CACHE_DIR,
-        f"dp_calibration_v3_obs_{gh}_nc{n_classes}_ns{n_s_buckets}_{n_sims}.npz",
+        f"dp_calibration_v3_obs5_{gh}_nc{n_classes}_ns{n_s_buckets}_{n_sims}.npz",
     )
-
     if os.path.exists(cache):
         dat = np.load(cache, allow_pickle=True)
         return (dat["V3"], dat["A3"], dat["T"],
@@ -87,46 +90,47 @@ def calibrate_v3_obs_table(
     T_cnt  = np.zeros((n, n_s_buckets))
     T_tot  = np.zeros(n)
 
-    for sim in range(n_sims):
-        env = _make_env(graph, B=1e9, c=cfg.production_cost,
-                        seed=seed + sim, weight_high=cfg.weight_high)
-        env.reset()
-        node_to_idx = {v: i for i, v in enumerate(env.nodes)}
+    # 5 passes × n_sims: pass t_pass is dedicated to tier tiers_list[t_pass].
+    # Total offers = 5 × n_sims × n  (matches oracle's 5 labels per buyer).
+    for t_pass in range(n_tiers):
+        t_disc = tiers_list[t_pass]
+        for sim in range(n_sims):
+            env = _make_env(graph, B=1e9, c=cfg.production_cost,
+                            seed=seed + t_pass * n_sims + sim,
+                            weight_high=cfg.weight_high)
+            env.reset()
+            node_to_idx = {v: i for i, v in enumerate(env.nodes)}
 
-        for k, node in enumerate(ordering):
-            if node in env.offered:
-                continue
-            if env._check_bankrupt():
-                break
+            for k, node in enumerate(ordering):
+                if node in env.offered:
+                    continue
+                if env._check_bankrupt():
+                    break
 
-            est_val = env._estimate_valuation(node)
-            cls     = int(class_of_pos[k])
-            s_size  = len(env.S)
-            sb      = _sb(s_size)
+                est_val = env._estimate_valuation(node)
+                cls     = int(class_of_pos[k])
+                s_size  = len(env.S)
+                sb      = _sb(s_size)
 
-            # Accumulate V (uses est_val only — no true_val)
-            V3_sum[cls, sb] += est_val
-            V3_cnt[cls, sb] += 1
-            T_cnt[k, sb]    += 1
-            T_tot[k]        += 1
+                # V and T: collect only on pass 0 (mid tier) to avoid bias
+                if t_pass == 2:   # tier=0.5 pass — balanced acceptance
+                    V3_sum[cls, sb] += est_val
+                    V3_cnt[cls, sb] += 1
+                    T_cnt[k, sb]    += 1
+                    T_tot[k]        += 1
 
-            # Choose ONE tier for this (sim, position) pair — round-robin
-            t_obs   = (sim * n + k) % n_tiers
-            t_disc  = tiers_list[t_obs]
+                # OBSERVABLE acceptance via env.step()
+                nidx = node_to_idx[node]
+                _, _, done, info = env.step(nidx, t_disc)
+                accepted = bool(info.get("accepted", False))
 
-            # OBSERVABLE acceptance: call env.step(), record info["accepted"]
-            nidx = node_to_idx[node]
-            _, _, done, info = env.step(nidx, t_disc)
-            accepted = bool(info.get("accepted", False))
+                A3_num[cls, sb, t_pass] += 1.0 if accepted else 0.0
+                A3_den[cls, sb, t_pass] += 1.0
 
-            A3_num[cls, sb, t_obs] += 1.0 if accepted else 0.0
-            A3_den[cls, sb, t_obs] += 1.0
-            # Other tiers: not updated this step (prior 0.5 used for empty cells)
+                if done:
+                    break
 
-            if done:
-                break
-
-    # V3: mean est_val (fill zeros by nearest-neighbour)
+    # V3: mean est_val from mid-tier pass (tier=0.5), fill zeros
     V3 = np.where(V3_cnt > 0, V3_sum / np.maximum(V3_cnt, 1), 0.0)
     for d_idx in range(n_classes):
         prev = None
@@ -139,8 +143,45 @@ def calibrate_v3_obs_table(
             if V3[d_idx, sb] < 1e-12 and V3[d_idx, sb + 1] > 1e-12:
                 V3[d_idx, sb] = V3[d_idx, sb + 1]
 
-    # A3: fill unobserved cells with prior 0.5
-    A3 = np.where(A3_den > 0, A3_num / np.maximum(A3_den, 1), 0.5)
+    # A3 raw estimates
+    A3 = np.where(A3_den > 0, A3_num / np.maximum(A3_den, 1), np.nan)
+
+    # Monotone interpolation:
+    # Step 1: along tier axis, enforce non-increasing A3[d,sb,*] (lower price→higher acc)
+    #   tiers_list = [1.0, 0.8, 0.5, 0.2, 0.0] → t_idx=0 cheapest (free) → A should decrease
+    # Step 2: nearest-neighbour fill remaining NaN along sb then d axes
+    for d_idx in range(n_classes):
+        for sb in range(n_s_buckets):
+            row = A3[d_idx, sb, :]  # shape (n_tiers,)
+            # Forward fill (t=0 to t=4): A3[t] <= A3[t-1] (monotone non-increasing)
+            observed = ~np.isnan(row)
+            if observed.any():
+                # Interpolate NaNs between observed points
+                xs = np.where(observed)[0]
+                ys = row[observed]
+                if len(xs) > 1:
+                    interp = np.interp(np.arange(n_tiers), xs, ys)
+                else:
+                    interp = np.full(n_tiers, ys[0])
+                # Enforce monotone non-increasing
+                for t in range(1, n_tiers):
+                    if interp[t] > interp[t - 1]:
+                        interp[t] = interp[t - 1]
+                A3[d_idx, sb, :] = interp
+    # Fill any fully-NaN (cls, sb) cells from nearest sb neighbour
+    for d_idx in range(n_classes):
+        prev_row = None
+        for sb in range(n_s_buckets):
+            if not np.isnan(A3[d_idx, sb, 0]):
+                prev_row = A3[d_idx, sb, :]
+            elif prev_row is not None:
+                A3[d_idx, sb, :] = prev_row
+        for sb in range(n_s_buckets - 2, -1, -1):
+            if np.isnan(A3[d_idx, sb, 0]) and not np.isnan(A3[d_idx, sb + 1, 0]):
+                A3[d_idx, sb, :] = A3[d_idx, sb + 1, :]
+    # Final fallback: replace any remaining NaN with 0.5
+    A3 = np.where(np.isnan(A3), 0.5, A3)
+
     T  = T_cnt / np.maximum(T_tot[:, np.newaxis], 1)
 
     np.savez(cache, V3=V3, A3=A3, T=T,
