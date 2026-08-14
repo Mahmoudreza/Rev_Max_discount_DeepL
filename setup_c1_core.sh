@@ -67,7 +67,7 @@ safe_mv() {
     git mv "$src" "$dst"
   else
     mv "$src" "$dst"
-    git add "$dst"
+    git add -f "$dst"   # -f: override any .gitignore rules on archive/ paths
   fi
 }
 
@@ -128,7 +128,7 @@ if [ -d "experiments/figures" ]; then
     git mv experiments/figures archive/experiments/figures
   else
     mv experiments/figures archive/experiments/figures
-    git add "archive/experiments/figures"
+    git add -f "archive/experiments/figures"
   fi
 fi
 
