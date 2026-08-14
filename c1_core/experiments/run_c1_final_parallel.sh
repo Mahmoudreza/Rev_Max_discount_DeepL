@@ -44,18 +44,21 @@ echo ""
 
 PIDS=()
 for SHARD in 0 1 2 3 4; do
-  # Assign GPU round-robin if available
+  # Assign GPU round-robin if available.
+  # When CUDA_VISIBLE_DEVICES=N is set, the process sees only one GPU as cuda:0.
   if [ "$N_GPU" -gt 0 ]; then
     GPU_ID=$(( SHARD % N_GPU ))
-    DEV="cuda:$GPU_ID"
+    VISIBLE="$GPU_ID"
+    DEV="cuda:0"   # inside the worker, the visible GPU is always index 0
   else
+    VISIBLE=""
     DEV="$DEVICE"
   fi
 
   LOG_FILE="$LOG_DIR/c1_final_shard${SHARD}.log"
-  echo "  Shard $SHARD → device=$DEV  log=$LOG_FILE"
+  echo "  Shard $SHARD → CUDA_VISIBLE_DEVICES=$VISIBLE  device=$DEV  log=$LOG_FILE"
 
-  CUDA_VISIBLE_DEVICES=${GPU_ID:-""} \
+  CUDA_VISIBLE_DEVICES="$VISIBLE" \
   python -u "$SCRIPT" \
     --shard "$SHARD" \
     --config "$CONFIG" \
