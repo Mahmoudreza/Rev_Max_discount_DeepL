@@ -1020,3 +1020,33 @@ Verification anchors (FF_1000 k=10, seeds=[42,123,7], Convention B):
 
 Confirmed 2026-08-13: all roles in eval_all_methods_ksweep.py use correct convention.
 No sweep rerun required.
+
+---
+## CAL-DP CALIBRATION BUDGET (frozen)
+
+**Chosen configuration: 5 passes × 5 sims = 25,000 observed offers per graph**
+Applies unchanged to ALL networks (FF_1000, polblogs, rice_facebook, etc.).
+
+Calibration budget curve (FF_1000, seeds [42,123,7], k=[5,10,20,40], c=0.3):
+
+| obs_offers | passes×sims | k=5   | k=10  | k=20  | k=40  | cal_s | %cells_obs |
+|-----------|-------------|-------|-------|-------|-------|-------|------------|
+|   25,000  |    5×5      | 293.3 | 381.0 | 387.7 | 394.3 |    60 |   35.7%    |  ← CHOSEN
+|   50,000  |    5×10     | 284.1 | 376.2 | 382.9 | 386.2 |   180 |   41.3%    |
+|  100,000  |    5×20     | 276.8 | 379.9 | 385.5 | 390.6 |   240 |   41.3%    |
+|  200,000  |    5×40     | 278.2 | 380.6 | 386.2 | 386.2 |   468 |   41.3%    |
+
+Selection rule: smallest budget with mean_rev ≥ 98% of maximum.
+Max mean revenue: 364.07 (at 25k). All budgets within 2% → 25k chosen.
+
+The curve flattens at 50k (cell fill saturates at 41.3%); 25k is equally
+competitive due to evaluation variance dominating above that threshold.
+
+Reference rows (do not rerun):
+  Oracle Cal-DP: 317.9 / 434.5 / 443.7 / 443.7
+  Greedy+Budget:  52.5 /  96.7 / 422.6 / 451.8
+  IE+Budget:      84.1 / 140.2 / 195.1 / 257.0
+
+Calibration implementation: dp_calibrated_v3_obs.py, calibrate_v3_obs_table(),
+n_sims=5, 5 passes (one per tier), monotone tier interpolation for empty cells.
+Commit: see caldp_calibration_curve.json in results/logs/.
