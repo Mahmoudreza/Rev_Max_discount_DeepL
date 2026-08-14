@@ -122,8 +122,8 @@ NON_C1_EXPS=(
 for f in "${NON_C1_EXPS[@]}"; do
   safe_mv "experiments/$f" "archive/experiments/$f"
 done
-# Move figures subdir
-if [ -d "experiments/figures" ]; then
+# Move figures subdir (idempotent — skip if dest already exists)
+if [ -d "experiments/figures" ] && [ ! -d "archive/experiments/figures" ]; then
   if git ls-files --error-unmatch "experiments/figures" &>/dev/null 2>&1; then
     git mv experiments/figures archive/experiments/figures
   else
