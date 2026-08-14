@@ -52,6 +52,22 @@ PYEOF
 
 echo "=== Copying checkpoint (not moving) ==="
 cp results/checkpoints/rev_gnn_lstm.pt c1_core/checkpoints/rev_gnn_lstm.pt
+# Allow .pt files in c1_core/checkpoints/ (override .gitignore *.pt rules)
+if ! grep -q 'c1_core/checkpoints' .gitignore 2>/dev/null; then
+  printf '\n# Allow C1 checkpoint copy\n!c1_core/checkpoints/*.pt\n' >> .gitignore
+fi
+
+# Helper: git mv if tracked, plain mv otherwise (with git add for dest)
+safe_mv() {
+  local src="$1" dst="$2"
+  [ -f "$src" ] || { return 0; }   # skip missing
+  if git ls-files --error-unmatch "$src" &>/dev/null 2>&1; then
+    git mv "$src" "$dst"
+  else
+    mv "$src" "$dst"
+    git add "$dst"
+  fi
+}
 
 echo "=== git mv: C1 experiments → c1_core/experiments/ ==="
 for f in \
@@ -61,7 +77,7 @@ for f in \
   eval_idea1.py \
   eval_on_rice_facebook.py \
   run_baselines.py; do
-  [ -f "experiments/$f" ] && git mv "experiments/$f" "c1_core/experiments/$f" || echo "  SKIP (missing): $f"
+  safe_mv "experiments/$f" "c1_core/experiments/$f" || echo "  SKIP (missing): $f"
 done
 
 echo "=== git mv: non-C1 experiments → archive/experiments/ ==="
@@ -102,16 +118,23 @@ NON_C1_EXPS=(
   run_ie_budget_ksweep_parallel.sh
 )
 for f in "${NON_C1_EXPS[@]}"; do
-  [ -f "experiments/$f" ] && git mv "experiments/$f" "archive/experiments/$f" || true
+  safe_mv "experiments/$f" "archive/experiments/$f"
 done
 # Move figures subdir
-[ -d "experiments/figures" ] && git mv experiments/figures archive/experiments/figures || true
+if [ -d "experiments/figures" ]; then
+  if git ls-files --error-unmatch "experiments/figures" &>/dev/null 2>&1; then
+    git mv experiments/figures archive/experiments/figures
+  else
+    mv experiments/figures archive/experiments/figures
+    git add "archive/experiments/figures"
+  fi
+fi
 
 echo "=== git mv: non-C1 src → archive/src/ ==="
 
 # env
 for f in budget_revenue_env.py time_critical_revenue_env.py ba_generators.py; do
-  [ -f "src/env/$f" ] && git mv "src/env/$f" "archive/src/env/$f" || true
+  safe_mv "src/env/$f" "archive/src/env/$f"
 done
 
 # evaluation
@@ -119,7 +142,7 @@ for f in budget_baselines.py bmin_feasibility.py dp_calibrated.py dp_calibrated_
           dp_calibrated_v3.py fair_baselines.py fairness_audit.py \
           hybrid_lookahead_policy.py ie_budget.py rollout_expert.py \
           tc_baselines.py tc_evaluation.py; do
-  [ -f "src/evaluation/$f" ] && git mv "src/evaluation/$f" "archive/src/evaluation/$f" || true
+  safe_mv "src/evaluation/$f" "archive/src/evaluation/$f"
 done
 
 # models
@@ -127,22 +150,24 @@ for f in encoders/episode_transformer.py encoders/graph_transformer.py \
           policies/joint_policy.py policies/ppo_policy.py policies/sac_policy.py \
           policies/transformer_joint_policy.py \
           sequence/lstm_policy.py sequence/transformer_policy.py; do
-  [ -f "src/models/$f" ] && git mv "src/models/$f" "archive/src/models/$f" || true
+  safe_mv "src/models/$f" "archive/src/models/$f"
 done
 
 # training
 for f in gail_trainer.py ppo_trainer.py sac_trainer.py tc_reinforce_trainer.py; do
-  [ -f "src/training/$f" ] && git mv "src/training/$f" "archive/src/training/$f" || true
+  safe_mv "src/training/$f" "archive/src/training/$f"
 done
 
 # utils
 for f in budget_features.py budget_visualization.py dp_upgrade_visualization.py \
           idea3_figures.py tc_visualization.py; do
-  [ -f "src/utils/$f" ] && git mv "src/utils/$f" "archive/src/utils/$f" || true
+  safe_mv "src/utils/$f" "archive/src/utils/$f"
 done
 
 echo "=== git add new files ==="
-git add c1_core/__init__.py c1_core/checkpoints/rev_gnn_lstm.pt
+git add c1_core/__init__.py
+git add -f c1_core/checkpoints/rev_gnn_lstm.pt   # -f: override *.pt in .gitignore
+git add .gitignore                                # record the !c1_core/checkpoints exception
 
 echo "=== Done. Committing... ==="
 git commit -m "feat: isolate C1 material into c1_core/, archive non-C1 code
