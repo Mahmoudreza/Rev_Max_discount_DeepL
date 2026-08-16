@@ -88,14 +88,12 @@ def run_network(net, out_dir):
         on_mean = round(float(np.mean(on_raw)),2)
         on_std  = round(float(np.std(on_raw)),2)
 
-        # Off-graph (calibrate on different realisation)
+        # Off-graph (calibrate on different realisation, eval on that graph)
         if has_offgraph:
             r2x = dp_calibrated_v2_obs_budget(graph_off, cfg, B=B, c=C,
-                                               n_trials=N_TRIALS, n_sims=N_SIMS,
-                                               eval_graph=graph_tgt)
+                                               n_trials=N_TRIALS, n_sims=N_SIMS)
             r3x = dp_calibrated_v3_obs_budget(graph_off, cfg, B=B, c=C,
-                                               n_trials=N_TRIALS, n_sims=N_SIMS,
-                                               eval_graph=graph_tgt)
+                                               n_trials=N_TRIALS, n_sims=N_SIMS)
             off_raw = _composite(r2x, r3x)
             off_mean = round(float(np.mean(off_raw)),2)
             off_std  = round(float(np.std(off_raw)),2)
