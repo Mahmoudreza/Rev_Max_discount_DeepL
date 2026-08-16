@@ -56,7 +56,7 @@ for i, m in enumerate(methods):
 short_labels = ["FF-500", "FF-1000", "FF-2000", "Modular-FF", "Rice-FB"]
 ax1.set_xticks(x)
 ax1.set_xticklabels(short_labels, fontsize=10)
-ax1.set_ylabel("Seller Revenue", fontsize=12)
+ax1.set_ylabel("Revenue", fontsize=12)
 ax1.set_title("Revenue Comparison Across Networks (seed=42)", fontsize=12)
 ax1.legend(fontsize=8, loc="upper left")
 ax1.grid(axis="y", alpha=0.3)
@@ -95,7 +95,7 @@ for n, net in zip(ff_n, ff_nets):
                  ha="center", fontsize=7.5, color="#1f77b4", fontweight="bold")
 
 ax2.set_xlabel("Market Size $n$  (Forest Fire graph)", fontsize=12)
-ax2.set_ylabel("Seller Revenue", fontsize=12)
+ax2.set_ylabel("Revenue", fontsize=12)
 ax2.set_title("Revenue vs. Market Size  (Babaei et al. style)", fontsize=12)
 ax2.set_xticks(ff_n)
 ax2.set_xticklabels(ff_labels, fontsize=9)
