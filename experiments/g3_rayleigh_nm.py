@@ -100,18 +100,15 @@ def run_caldp_nm_episode(graph, cfg: BudgetEnvConfig,
         except: infl = 0.0
         ib  = min(_infl_bucket(infl, infl_bnd), A.shape[1]-1)
 
-        # DP value function lookup
-        b_step = min(int(env.B / 0.05), V.shape[-1]-1)
-
+        # V shape: (n_cls, n_ib)  — no budget dimension in v2_obs tables
         best_val = -1e18; best_disc = 0.0; best_ti = 0
         for ti, d in enumerate(TIERS):
             est = float(env._estimate_valuation(node))
             price = est * (1.0 - d)
             if env.B - C + price < -1e-9: continue
             p_acc = float(A[cls, ib, ti])
-            b_next = min(int((env.B - C + price) / 0.05), V.shape[-1]-1) if p_acc > 0 else b_step
-            # Immediate + continuation
-            val = p_acc * price + float(V[cls, ib, b_next])
+            # Immediate + continuation (V gives expected future revenue)
+            val = p_acc * price + float(V[cls, ib])
             if val > best_val:
                 best_val = val; best_disc = d; best_ti = ti
 
