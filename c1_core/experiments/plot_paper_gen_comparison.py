@@ -39,7 +39,7 @@ d = json.load(open(DATA))
 
 
 # ── Figure 1: Grouped bar chart (all 5 networks) ──────────────────────────────
-networks = list(d.keys())
+networks = [n for n in d.keys() if n != "FF n=500"]
 methods  = list(METHOD_STYLE.keys())
 x        = np.arange(len(networks))
 w        = 0.18
@@ -53,11 +53,11 @@ for i, m in enumerate(methods):
     ax1.bar(x + offsets[i], vals, width=w, color=st["color"],
             label=st["label"], alpha=0.88, edgecolor="white", linewidth=0.5)
 
-short_labels = ["FF-500", "FF-1000", "FF-2000", "Modular-FF", "Rice-FB"]
+short_labels = ["FF-1000", "FF-2000", "Modular-FF", "Rice-FB"]
 ax1.set_xticks(x)
 ax1.set_xticklabels(short_labels, fontsize=10)
 ax1.set_ylabel("Revenue", fontsize=12)
-ax1.set_title("Revenue Comparison Across Networks (seed=42)", fontsize=12)
+ax1.set_title("Revenue Comparison Across Networks", fontsize=12)
 ax1.legend(fontsize=8, loc="upper left")
 ax1.grid(axis="y", alpha=0.3)
 ax1.set_ylim(bottom=0)
