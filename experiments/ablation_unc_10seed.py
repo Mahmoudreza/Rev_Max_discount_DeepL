@@ -115,11 +115,17 @@ def run_ep_fixed(pol, graph, cache, ei, seed, device):
 
 
 def greedy_disc_ep(graph, seed):
-    """Greedy-Discount unconstrained baseline."""
+    """Greedy-Discount unconstrained baseline (OmegaConf-compat namespace)."""
     set_seed(seed)
+    import types
     from src.evaluation.baselines import greedy_discount
-    from src.env.revenue_env import RevenueEnvConfig
-    return float(greedy_discount(graph, RevenueEnvConfig(seed=seed)))
+    cfg = types.SimpleNamespace(
+        influence=types.SimpleNamespace(
+            model="monotone", b=1.0, weight_low=0.0, weight_high=2.0, n_mc_samples=200),
+        reward=types.SimpleNamespace(type="flat", gamma=1.0),
+        project=types.SimpleNamespace(seed=seed),
+    )
+    return float(greedy_discount(graph, cfg))
 
 
 def _stats(vals):
