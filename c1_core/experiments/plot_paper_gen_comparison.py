@@ -28,10 +28,10 @@ OUTD  = "results/figures"
 
 # ── colour / style map (paper-consistent) ────────────────────────────────────
 METHOD_STYLE = {
-    "IE-Strategy":     dict(color="#d62728", ls=":", marker="s",  lw=1.6, label="IE-Strategy (Babaei 2013)"),
-    "Greedy-Discount": dict(color="#2ca02c", ls="-.", marker="^", lw=1.8, label="Greedy-Discount (Babaei 2013)"),
-    "Rev-GNN-IM-RL":   dict(color="#ff7f0e", ls="--", marker="o", lw=1.8, label="Rev-GNN-IM-RL (ours, no LSTM)"),
-    "Rev-GNN-LSTM":    dict(color="#1f77b4", ls="-",  marker="D", lw=2.2, label="Rev-GNN-LSTM (ours)"),
+    "IE-Strategy":     dict(color="#d62728", ls=":", marker="s",  lw=1.6, label="IE-Strategy"),
+    "Greedy-Discount": dict(color="#2ca02c", ls="-.", marker="^", lw=1.8, label="Greedy-Discount"),
+    "Rev-GNN-IM-RL":   dict(color="#ff7f0e", ls="--", marker="o", lw=1.8, label="Rev-GNN-IM-RL"),
+    "Rev-GNN-LSTM":    dict(color="#1f77b4", ls="-",  marker="D", lw=2.2, label="Rev-GNN-LSTM"),
 }
 
 os.makedirs(OUTD, exist_ok=True)
