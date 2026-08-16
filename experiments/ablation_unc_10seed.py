@@ -117,7 +117,8 @@ def greedy_disc_ep(graph, seed):
     """Greedy-Discount unconstrained baseline."""
     set_seed(seed)
     from src.evaluation.baselines import greedy_discount
-    return float(greedy_discount(graph, seed=seed))
+    from src.env.revenue_env import RevenueEnvConfig
+    return float(greedy_discount(graph, RevenueEnvConfig(seed=seed)))
 
 
 def _stats(vals):

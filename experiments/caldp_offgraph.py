@@ -57,8 +57,9 @@ def _composite(r2, r3):
 
 def calib_fill_fraction(A, P):
     """Fraction of cells with at least one direct observation (non-zero count)."""
-    a_fill = float((A > 0).any(axis=2).mean())
-    p_fill = float((P > 0).any(axis=2).mean()) if P is not None else float("nan")
+    # A may be 3D (n_classes, n_buckets, n_tiers); P may be 2D (n_classes, n_buckets)
+    a_fill = float((A > 0).reshape(A.shape[0], A.shape[1], -1).any(axis=2).mean())
+    p_fill = float((P > 0).mean()) if P is not None else float("nan")
     return a_fill, p_fill
 
 

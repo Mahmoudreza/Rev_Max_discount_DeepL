@@ -46,7 +46,7 @@ from src.utils.features import (
 from src.utils.helpers import set_seed
 from _arm_b_utils import load_arm_b as _load_arm_b_util, make_ei as _make_ei, eval_arm_b_k, _feat_unconstrained, ARM_B_SHA as _ARM_B_SHA
 from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table
-from src.evaluation.dp_calibrated import _deg_class, _infl_bucket
+from src.evaluation.dp_calibrated import _deg_class
 
 K_VALUES = [5, 10, 15, 20, 30, 40]
 C = 0.3; N_TRIALS = 10; N_SIMS = 5; W_HIGH = 1.0
