@@ -46,11 +46,7 @@ try:
 except ImportError:
     from src.evaluation.budget_baselines import ie_strategy_budget  # fallback
 
-from src.utils.graph_to_pyg import graph_to_pyg_data
-try:
-    from src.utils.helpers import get_available_mask, set_seed
-except ImportError:
-    from src.utils.features import get_available_mask, set_seed  # fallback name
+from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
 
 # ── Protocol ──────────────────────────────────────────────────────────────────
 K_VALUES    = [5, 10, 15, 20, 30, 40]

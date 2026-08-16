@@ -39,11 +39,7 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import (
     compute_static_features, build_graph_feature_cache, compute_node_features_fast,
 )
-from src.utils.graph_to_pyg import graph_to_pyg_data
-try:
-    from src.utils.helpers import get_available_mask, set_seed
-except ImportError:
-    from src.utils.features import get_available_mask, set_seed
+from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
 from src.evaluation.budget_baselines import greedy_discount_budget
 from src.evaluation.dp_calibrated_v2_obs import dp_calibrated_v2_obs_budget
 from src.evaluation.dp_calibrated_v3_obs import dp_calibrated_v3_obs_budget

@@ -17,10 +17,23 @@ export OMP_NUM_THREADS=4
 NGPU=${1:-4}
 G=0   # round-robin GPU counter
 
+# Detect python: use activated env's python, else python3, else python
+PYTHON=$(command -v python 2>/dev/null || command -v python3 2>/dev/null)
+if [ -z "$PYTHON" ]; then echo "ERROR: no python found in PATH"; exit 1; fi
+echo "Python: $PYTHON  ($(${PYTHON} --version 2>&1))"
+
 PIDS_A=()   # Block A eval workers (need merge after)
 PIDS_ALL=() # everything else
 
-nxt_gpu() { echo $((G % NGPU)); G=$((G+1)); }
+# Note: nxt_gpu runs in a subshell ($(...)), so G must be incremented in parent.
+# Use a file-based counter to share state across subshell calls.
+_GPU_COUNTER_FILE=$(mktemp)
+echo 0 > "$_GPU_COUNTER_FILE"
+nxt_gpu() {
+    local c; c=$(cat "$_GPU_COUNTER_FILE")
+    echo $((c % NGPU))
+    echo $((c + 1)) > "$_GPU_COUNTER_FILE"
+}
 
 echo "============================================================"
 echo " Parallel block launcher  GPUs=0...$((NGPU-1))"
@@ -32,7 +45,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     GPU=$(nxt_gpu)
     LOG=/tmp/blockA_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
-    CUDA_VISIBLE_DEVICES=$GPU nohup python -u \
+    CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
         experiments/budget_sweep_10seed.py --networks "$NET" --gpu "$GPU" \
         > "$LOG" 2>&1 &
     PIDS_A+=($!)
@@ -41,7 +54,7 @@ done
 # ── BLOCK B: ordering + Phase-1 ablation (unconstrained, 10 seeds) ───────────
 echo "[B] Ablation unconstrained 10-seed"
 GPU=$(nxt_gpu); LOG=/tmp/blockB.log
-CUDA_VISIBLE_DEVICES=$GPU nohup python -u \
+CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
     experiments/ablation_unc_10seed.py --gpu "$GPU" \
     > "$LOG" 2>&1 &
 PIDS_ALL+=($!)
@@ -53,7 +66,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     GPU=$(nxt_gpu)
     LOG=/tmp/blockC_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
-    CUDA_VISIBLE_DEVICES=$GPU nohup python -u \
+    CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
         experiments/controls_10seed.py --networks "$NET" --gpu "$GPU" \
         > "$LOG" 2>&1 &
     PIDS_ALL+=($!)
@@ -62,7 +75,7 @@ done
 # ── BLOCK D2: off-graph Cal-DP + B4 fill fractions (CPU-heavy, no GNN) ───────
 echo "[D2] Off-graph Cal-DP + B4 fill fractions"
 LOG=/tmp/blockD2.log
-nohup python -u \
+nohup "$PYTHON" -u \
     experiments/caldp_offgraph.py \
     > "$LOG" 2>&1 &
 PIDS_ALL+=($!)
@@ -71,7 +84,7 @@ echo "    → CPU  $LOG"
 # ── BLOCK E: misspecification (FF-1000 + Rice-FB) ────────────────────────────
 echo "[E] Misspecification"
 GPU=$(nxt_gpu); LOG=/tmp/blockE.log
-CUDA_VISIBLE_DEVICES=$GPU nohup python -u \
+CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
     experiments/misspec_eval.py --gpu "$GPU" \
     > "$LOG" 2>&1 &
 PIDS_ALL+=($!)
@@ -83,7 +96,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     GPU=$(nxt_gpu)
     LOG=/tmp/blockD1_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
-    CUDA_VISIBLE_DEVICES=$GPU nohup python -u \
+    CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
         experiments/adapt_policy.py --networks "$NET" --gpu "$GPU" \
         > "$LOG" 2>&1 &
     PIDS_ALL+=($!)
@@ -104,7 +117,7 @@ for pid in "${PIDS_A[@]}"; do
 done
 if [ "$A_FAILED" -eq 0 ]; then
     echo "Running Block A merge + paired tests..."
-    python -u experiments/merge_budget_10seed.py 2>&1 | tee /tmp/blockA_merge.log
+    "$PYTHON" -u experiments/merge_budget_10seed.py 2>&1 | tee /tmp/blockA_merge.log
 else
     echo "WARNING: $A_FAILED Block A shards failed — skipping merge. Fix and re-run merge manually:"
     echo "  python -u experiments/merge_budget_10seed.py"
