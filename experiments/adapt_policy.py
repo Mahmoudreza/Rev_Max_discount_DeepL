@@ -41,8 +41,8 @@ from _arm_b_utils import _feat_unconstrained, make_ei as _make_ei
 LR          = 5e-4
 CLIP_GRAD   = 1.0
 ENTROPY_C   = 0.005
-N_EPOCHS    = 500    # 500 × 50 per-epoch budget = 25k episodes
-EP_PER_EPOCH= 50
+N_EPOCHS    = 50     # 50 × 10 = 500 on-graph episodes (sample-efficiency claim)
+EP_PER_EPOCH= 10
 K_VALUES    = [5, 10, 15, 20, 30, 40]
 C           = 0.3; W_HIGH = 1.0; N_EVAL = 10
 CKPT_DIR    = "results/checkpoints"
@@ -140,7 +140,7 @@ def adapt_and_eval(net, device, out_dir):
         for s in range(EP_PER_EPOCH):
             _, r = run_train_ep(pol, graph, cache, ei, B_train, ep*EP_PER_EPOCH+s, device, opt)
             ep_rev.append(r)
-        if ep % 50 == 0:
+        if ep % 10 == 0:
             print(f"  ep={ep:4d}  train_rev={np.mean(ep_rev):.1f}  "
                   f"t={time.time()-t_start:.0f}s", flush=True)
     # Save checkpoint
