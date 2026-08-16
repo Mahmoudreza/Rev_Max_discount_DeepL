@@ -78,10 +78,10 @@ def run_network(net: str, out_path: str, device):
         B  = k * C
         t0 = time.time()
 
-        r_ie  = ie_strategy_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS)
-        r_gd  = greedy_discount_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS)
-        r2    = dp_calibrated_v2_obs_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIMS)
-        r3    = dp_calibrated_v3_obs_budget(graph, cfg, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIMS)
+        r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS)
+        r_gd  = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS)
+        r2    = dp_calibrated_v2_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
+        r3    = dp_calibrated_v3_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
 
         ie_raw  = _raw(r_ie, N_TRIALS)
         gd_raw  = _raw(r_gd, N_TRIALS)

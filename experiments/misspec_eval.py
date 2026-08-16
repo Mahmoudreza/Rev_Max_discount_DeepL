@@ -159,21 +159,20 @@ def main():
             for mode in MODES:
                 # IE
                 try:
-                    r_ie = ie_strategy_budget(graph, make_cfg(mode,B,0),
-                                              B=B, c=C, n_trials=N_TRIALS)
+                    r_ie = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS)
                     ie_v = r_ie.get("total_revenue",r_ie.get("revenue",{})).get("all",
                            [r_ie.get("total_revenue",r_ie.get("revenue",{0:0})).get("mean",0.)]*N_TRIALS)
                 except Exception: ie_v = [0.]*N_TRIALS
                 # Greedy
                 try:
-                    r_gd = greedy_discount_budget(graph, cfg0, B=B, c=C, n_trials=N_TRIALS)
+                    r_gd = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS)
                     gd_v = r_gd.get("total_revenue",r_gd.get("revenue",{})).get("all",
                            [r_gd.get("total_revenue",r_gd.get("revenue",{0:0})).get("mean",0.)]*N_TRIALS)
                 except Exception: gd_v = [0.]*N_TRIALS
                 # Cal-DP
                 try:
-                    r2 = dp_calibrated_v2_obs_budget(graph, cfg0, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIMS)
-                    r3 = dp_calibrated_v3_obs_budget(graph, cfg0, B=B, c=C, n_trials=N_TRIALS, n_sims=N_SIMS)
+                    r2 = dp_calibrated_v2_obs_budget(graph, cfg0, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
+                    r3 = dp_calibrated_v3_obs_budget(graph, cfg0, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
                     v2 = r2.get("revenue",{}).get("all",[r2.get("revenue",{}).get("mean",0.)]*N_TRIALS)
                     v3 = r3.get("revenue",{}).get("all",[r3.get("revenue",{}).get("mean",0.)]*N_TRIALS)
                     cdp_v = [max(a,b) for a,b in zip(v2,v3)]
