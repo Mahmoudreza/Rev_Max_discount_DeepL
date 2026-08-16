@@ -27,6 +27,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.env.revenue_env import RevenueEnv
 from src.env.polblogs_loader import load_polblogs
@@ -39,7 +40,12 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import (
     compute_static_features, build_graph_feature_cache, compute_node_features_fast,
 )
-from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
+from src.utils.helpers import set_seed
+from _arm_b_utils import (
+    load_arm_b as _load_arm_b, make_ei, eval_arm_b_episode_unc,
+    _feat_unconstrained, _avail_mask, ARM_B_SHA,
+)
+import torch as _torch
 
 # ── Protocol ──────────────────────────────────────────────────────────────────
 SEEDS        = list(range(10))
@@ -75,54 +81,35 @@ def load_graph(net):
     raise ValueError(net)
 
 
-def run_ep_free(pol, graph, seed, device):
-    """Standard: policy selects own order."""
-    set_seed(seed)
-    static = compute_static_features(graph)
-    cache  = build_graph_feature_cache(graph, static)
-    n, nodes = graph.number_of_nodes(), list(graph.nodes())
-    env = RevenueEnv(graph, seed=seed)
-    env.reset(); pol.reset_episode(device)
-    with torch.no_grad():
-        for _ in range(n):
-            avail = env.available_nodes
-            if not avail: break
-            feats = compute_node_features_fast(
-                cache=cache, S=frozenset(env.S), offered=frozenset(env.offered),
-                t=env.t, k=n, env=env)
-            data = graph_to_pyg_data(graph, feats, device)
-            mask = get_available_mask(n, frozenset(env.offered), nodes, device)
-            nidx, disc, _ = pol.select_and_price(data.x, data.edge_index, mask, greedy=True)
-            if nidx not in avail: nidx = avail[0]
-            _, rew, done, _ = env.step(nidx, disc)
-            pol.update_sequence_state(disc, rew > 0, float(rew))
-            if done: break
-    return float(env.total_revenue)
+@torch.no_grad()
+def run_ep_free(pol, graph, cache, ei, seed, device):
+    """Standard: policy selects own order (delegates to _arm_b_utils)."""
+    return eval_arm_b_episode_unc(pol, graph, cache, ei, seed, device)
 
 
-def run_ep_fixed(pol, graph, seed, device):
-    """Fixed degree order: pricing only."""
+@torch.no_grad()
+def run_ep_fixed(pol, graph, cache, ei, seed, device):
+    """Fixed degree order: pricing only (selection head forced)."""
+    import numpy as np
     set_seed(seed)
-    static = compute_static_features(graph)
-    cache  = build_graph_feature_cache(graph, static)
     n, nodes = graph.number_of_nodes(), list(graph.nodes())
     deg_ord = sorted(range(n), key=lambda i: graph.degree(nodes[i]), reverse=True)
     env = RevenueEnv(graph, seed=seed)
     env.reset(); pol.reset_episode(device)
-    with torch.no_grad():
-        for pos in deg_ord:
-            if not env.available_nodes: break
-            if nodes[pos] in env.offered: continue
-            mask = get_available_mask(n, frozenset(env.offered) | (
-                frozenset(range(n)) - {pos}), nodes, device)
-            feats = compute_node_features_fast(
-                cache=cache, S=frozenset(env.S), offered=frozenset(env.offered),
-                t=env.t, k=n, env=env)
-            data = graph_to_pyg_data(graph, feats, device)
-            _, disc, _ = pol.select_and_price(data.x, data.edge_index, mask, greedy=True)
-            _, rew, done, _ = env.step(pos, disc)
-            pol.update_sequence_state(disc, rew > 0, float(rew))
-            if done: break
+    for pos in deg_ord:
+        if not env.available_nodes: break
+        if nodes[pos] in env.offered: continue
+        x = _torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+        # force selection of only this node
+        av = _torch.zeros(n, dtype=_torch.bool, device=device)
+        av[pos] = True
+        sc, h, ctx, _ = pol.forward(x, ei, av)
+        ni = int(sc.argmax().item())
+        d = float(pol.get_discount_distribution(
+            _torch.cat([h[ni], ctx])).mean.item())
+        _, rew, done, _ = env.step(ni, d)
+        pol.update_sequence_state(d, rew > 0, float(rew))
+        if done: break
     return float(env.total_revenue)
 
 
@@ -165,10 +152,11 @@ def main():
     for net in args.networks:
         t0 = time.time()
         graph = load_graph(net)
+        ei, cache = make_ei(graph, device)
         gd   = [greedy_disc_ep(graph, s) for s in SEEDS]
-        free = [run_ep_free(pol, graph, s, device) for s in SEEDS]
-        fix  = [run_ep_fixed(pol, graph, s, device) for s in SEEDS]
-        p1   = [run_ep_free(p1_pol, graph, s, device) for s in SEEDS] if p1_pol else []
+        free = [run_ep_free(pol, graph, cache, ei, s, device) for s in SEEDS]
+        fix  = [run_ep_fixed(pol, graph, cache, ei, s, device) for s in SEEDS]
+        p1   = [run_ep_free(p1_pol, graph, cache, ei, s, device) for s in SEEDS] if p1_pol else []
         d_ab = round(np.mean(fix) - np.mean(free), 1)
         print(f"  {net:10s}  {np.mean(gd):>7.1f}  {np.mean(free):>9.1f}  "
               f"{np.mean(fix):>9.1f}  {d_ab:+5.1f}  "

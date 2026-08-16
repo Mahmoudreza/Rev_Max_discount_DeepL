@@ -25,6 +25,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import networkx as nx
 _orig_bc = nx.betweenness_centrality
@@ -39,7 +40,8 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import (
     compute_static_features, build_graph_feature_cache, compute_node_features_fast,
 )
-from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
+from src.utils.helpers import set_seed
+from _arm_b_utils import make_ei as _make_ei, _feat_unconstrained
 from src.evaluation.budget_baselines import greedy_discount_budget
 from src.evaluation.dp_calibrated_v2_obs import dp_calibrated_v2_obs_budget
 from src.evaluation.dp_calibrated_v3_obs import dp_calibrated_v3_obs_budget
@@ -113,10 +115,10 @@ def _stats(vals):
     return {"mean": round(float(a.mean()),2), "std": round(float(a.std()),2)}
 
 
-def arm_b_ep(pol, graph, B, seed, mode, device):
+@torch.no_grad()
+def arm_b_ep(pol, graph, cache, ei, B, seed, mode, device):
     set_seed(seed)
-    n, nodes = graph.number_of_nodes(), list(graph.nodes())
-    static = compute_static_features(graph); cache = build_graph_feature_cache(graph, static)
+    n = graph.number_of_nodes()
     try:
         cfg = make_cfg(mode, B, seed)
         env = BudgetRevenueEnv(graph, cfg)
@@ -124,19 +126,17 @@ def arm_b_ep(pol, graph, B, seed, mode, device):
         cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed, weight_high=W_HIGH)
         env = BudgetRevenueEnv(graph, cfg)
     env.reset(); pol.reset_episode(device)
-    with torch.no_grad():
-        for _ in range(n):
-            avail = env.available_nodes
-            if not avail: break
-            feats = compute_node_features_fast(cache=cache, S=frozenset(env.S),
-                offered=frozenset(env.offered), t=env.t, k=n, env=env)
-            data = graph_to_pyg_data(graph, feats, device)
-            mask = get_available_mask(n, frozenset(env.offered), nodes, device)
-            nidx, disc, _ = pol.select_and_price(data.x, data.edge_index, mask, greedy=True)
-            if nidx not in avail: nidx = avail[0]
-            _, rew, done, _ = env.step(nidx, disc)
-            pol.update_sequence_state(disc, rew > 0, float(rew))
-            if done: break
+    while env.available_nodes and not env._check_bankrupt():
+        x  = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+        av = torch.zeros(n, dtype=torch.bool, device=device)
+        for i in env.available_nodes: av[i] = True
+        if not av.any(): break
+        sc, h, ctx, _ = pol.forward(x, ei, av)
+        ni = int(sc.argmax().item())
+        d  = float(pol.get_discount_distribution(torch.cat([h[ni], ctx])).mean.item())
+        _, _, done, info = env.step(ni, d)
+        pol.update_sequence_state(d, info["accepted"], info.get("revenue_step", 0.0))
+        if done: break
     return float(env.total_revenue)
 
 
@@ -151,6 +151,7 @@ def main():
     results = {}
     for net in NETWORKS:
         graph = load_graph(net)
+        ei, cache = _make_ei(graph, device)
         cfg0  = BudgetEnvConfig(production_cost=C, weight_high=W_HIGH)
         results[net] = {}
         for k in K_VALUES:
@@ -178,7 +179,7 @@ def main():
                     cdp_v = [max(a,b) for a,b in zip(v2,v3)]
                 except Exception: cdp_v = [0.]*N_TRIALS
                 # GNN
-                gnn_v = [arm_b_ep(pol, graph, B, s, mode, device) for s in range(N_TRIALS)]
+                gnn_v = [arm_b_ep(pol, graph, cache, ei, B, s, mode, device) for s in range(N_TRIALS)]
 
                 results[net][k][mode] = {
                     "IE":      _stats(ie_v),

@@ -16,6 +16,7 @@ import torch
 import torch.optim as optim
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import networkx as nx
 _orig_bc = nx.betweenness_centrality
@@ -33,7 +34,8 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import (
     compute_static_features, build_graph_feature_cache, compute_node_features_fast,
 )
-from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
+from src.utils.helpers import set_seed
+from _arm_b_utils import _feat_unconstrained, make_ei as _make_ei
 
 # ── Hyper-params (Phase 2 recipe) ─────────────────────────────────────────────
 LR          = 5e-4
@@ -70,22 +72,19 @@ def load_fresh(device):
     pol.to(device); return pol
 
 
-def run_train_ep(pol, graph, cache, B, seed, device, opt):
+def run_train_ep(pol, graph, cache, ei, B, seed, device, opt):
     """One REINFORCE episode; returns (loss, reward)."""
     set_seed(seed)
-    n, nodes = graph.number_of_nodes(), list(graph.nodes())
+    n = graph.number_of_nodes()
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed, weight_high=W_HIGH)
     env = BudgetRevenueEnv(graph, cfg); env.reset(); pol.reset_episode(device)
     log_probs = []; rewards = []
-    for _ in range(n):
-        avail = env.available_nodes
-        if not avail: break
-        feats = compute_node_features_fast(cache=cache, S=frozenset(env.S),
-            offered=frozenset(env.offered), t=env.t, k=n, env=env)
-        data = graph_to_pyg_data(graph, feats, device)
-        mask = get_available_mask(n, frozenset(env.offered), nodes, device)
-        nidx, disc, log_p = pol.select_and_price(data.x, data.edge_index, mask, greedy=False)
-        if nidx not in avail: nidx = avail[0]
+    while env.available_nodes and not env._check_bankrupt():
+        x = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+        av = torch.zeros(n, dtype=torch.bool, device=device)
+        for i in env.available_nodes: av[i] = True
+        if not av.any(): break
+        nidx, disc, log_p = pol.select_and_price(x, ei, av, greedy=False)
         _, rew, done, _ = env.step(nidx, disc)
         pol.update_sequence_state(disc, rew > 0, float(rew))
         log_probs.append(log_p); rewards.append(float(rew))
@@ -103,34 +102,32 @@ def run_train_ep(pol, graph, cache, B, seed, device, opt):
     return float(loss.item()), R
 
 
-def eval_k(pol, graph, cache, k, device):
-    n, nodes = graph.number_of_nodes(), list(graph.nodes())
+@torch.no_grad()
+def eval_k(pol, graph, cache, ei, k, device):
+    n = graph.number_of_nodes()
     B = k * C; revs = []
     for seed in range(N_EVAL):
         set_seed(seed)
         cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed, weight_high=W_HIGH)
         env = BudgetRevenueEnv(graph, cfg); env.reset(); pol.reset_episode(device)
-        with torch.no_grad():
-            for _ in range(n):
-                avail = env.available_nodes
-                if not avail: break
-                feats = compute_node_features_fast(cache=cache, S=frozenset(env.S),
-                    offered=frozenset(env.offered), t=env.t, k=n, env=env)
-                data = graph_to_pyg_data(graph, feats, device)
-                mask = get_available_mask(n, frozenset(env.offered), nodes, device)
-                nidx, disc, _ = pol.select_and_price(data.x, data.edge_index, mask, greedy=True)
-                if nidx not in avail: nidx = avail[0]
-                _, rew, done, _ = env.step(nidx, disc)
-                pol.update_sequence_state(disc, rew > 0, float(rew))
-                if done: break
+        while env.available_nodes and not env._check_bankrupt():
+            x  = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+            av = torch.zeros(n, dtype=torch.bool, device=device)
+            for i in env.available_nodes: av[i] = True
+            if not av.any(): break
+            sc, h, ctx, _ = pol.forward(x, ei, av)
+            ni = int(sc.argmax().item())
+            d  = float(pol.get_discount_distribution(torch.cat([h[ni], ctx])).mean.item())
+            _, _, done, info = env.step(ni, d)
+            pol.update_sequence_state(d, info["accepted"], info.get("revenue_step", 0.0))
+            if done: break
         revs.append(float(env.total_revenue))
     return float(np.mean(revs)), float(np.std(revs))
 
 
 def adapt_and_eval(net, device, out_dir):
     graph = load_graph(net)
-    static = compute_static_features(graph)
-    cache  = build_graph_feature_cache(graph, static)
+    ei, cache = _make_ei(graph, device)
     pol    = load_fresh(device)
     opt    = optim.Adam(pol.parameters(), lr=LR)
     k_train = 20  # mid-range k for training
@@ -141,7 +138,7 @@ def adapt_and_eval(net, device, out_dir):
     for ep in range(N_EPOCHS):
         ep_rev = []
         for s in range(EP_PER_EPOCH):
-            _, r = run_train_ep(pol, graph, cache, B_train, ep*EP_PER_EPOCH+s, device, opt)
+            _, r = run_train_ep(pol, graph, cache, ei, B_train, ep*EP_PER_EPOCH+s, device, opt)
             ep_rev.append(r)
         if ep % 50 == 0:
             print(f"  ep={ep:4d}  train_rev={np.mean(ep_rev):.1f}  "
@@ -158,7 +155,7 @@ def adapt_and_eval(net, device, out_dir):
     # Eval at all k
     eval_results = {}
     for k in K_VALUES:
-        m, s = eval_k(pol, graph, cache, k, device)
+        m, s = eval_k(pol, graph, cache, ei, k, device)
         eval_results[k] = {"mean": round(m,2), "std": round(s,2)}
         print(f"  eval k={k}  {m:.1f}±{s:.1f}", flush=True)
 

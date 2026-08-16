@@ -26,6 +26,7 @@ import torch
 import networkx as nx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 _orig_bc = nx.betweenness_centrality
 nx.betweenness_centrality = lambda G, normalized=True, **kw: _orig_bc(
@@ -42,7 +43,8 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import (
     compute_static_features, build_graph_feature_cache, compute_node_features_fast,
 )
-from src.utils.helpers import graph_to_pyg_data, get_available_mask, set_seed
+from src.utils.helpers import set_seed
+from _arm_b_utils import load_arm_b as _load_arm_b_util, make_ei as _make_ei, eval_arm_b_k, _feat_unconstrained, ARM_B_SHA as _ARM_B_SHA
 from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table
 from src.evaluation.dp_calibrated import _deg_class, _infl_bucket
 
@@ -142,33 +144,32 @@ def c2_myopic_k(graph, B, n_trials, V, A, P, cb, ib):
 
 
 # ── C3: PageRank ordering + policy pricing ────────────────────────────────────
-def c3_pagerank_ep(pol, graph, B, seed, device):
-    """PageRank-sorted order, policy pricing head."""
+@torch.no_grad()
+def c3_pagerank_ep(pol, graph, cache, ei, B, seed, device):
+    """PageRank-sorted order, policy pricing head (correct forward path)."""
     set_seed(seed)
     pr = nx.pagerank(graph)
-    nodes = list(graph.nodes())
-    n = len(nodes)
+    nodes = list(graph.nodes()); n = len(nodes)
     pr_order = sorted(range(n), key=lambda i: pr[nodes[i]], reverse=True)
-    static = compute_static_features(graph); cache = build_graph_feature_cache(graph, static)
+    from src.env.budget_revenue_env import BudgetEnvConfig, BudgetRevenueEnv
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed, weight_high=W_HIGH)
     env = BudgetRevenueEnv(graph, cfg); env.reset(); pol.reset_episode(device)
-    with torch.no_grad():
-        for pos in pr_order:
-            if not env.available_nodes or env._check_bankrupt(): break
-            if nodes[pos] in env.offered: continue
-            mask = get_available_mask(n, frozenset(env.offered)|(frozenset(range(n))-{pos}), nodes, device)
-            feats = compute_node_features_fast(cache=cache, S=frozenset(env.S),
-                offered=frozenset(env.offered), t=env.t, k=n, env=env)
-            data = graph_to_pyg_data(graph, feats, device)
-            _, disc, _ = pol.select_and_price(data.x, data.edge_index, mask, greedy=True)
-            _, rew, done, _ = env.step(pos, disc)
-            pol.update_sequence_state(disc, rew > 0, float(rew))
-            if done: break
+    for pos in pr_order:
+        if not env.available_nodes or env._check_bankrupt(): break
+        if nodes[pos] in env.offered: continue
+        x = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+        av = torch.zeros(n, dtype=torch.bool, device=device); av[pos] = True
+        sc, h, ctx, _ = pol.forward(x, ei, av)
+        ni = int(sc.argmax().item())
+        d = float(pol.get_discount_distribution(torch.cat([h[ni], ctx])).mean.item())
+        _, rew, done, _ = env.step(ni, d)
+        pol.update_sequence_state(d, rew > 0, float(rew))
+        if done: break
     return float(env.total_revenue)
 
 
-def c3_pagerank_k(pol, graph, B, n_trials, device):
-    return [c3_pagerank_ep(pol, graph, B, s, device) for s in range(n_trials)]
+def c3_pagerank_k(pol, graph, cache, ei, B, n_trials, device):
+    return [c3_pagerank_ep(pol, graph, cache, ei, B, s, device) for s in range(n_trials)]
 
 
 def _stats(vals):
@@ -181,6 +182,7 @@ def run_network(net, out_dir, device):
     graph = load_graph(net)
     cfg0  = BudgetEnvConfig(production_cost=C, weight_high=W_HIGH)
     arm_b = load_arm_b(device)
+    ei, cache = _make_ei(graph, device)
     V, A, P, cb, ib = calibrate_v2_obs_table(graph, cfg0, n_sims=N_SIMS, seed=0)
     print(f"\n=== {net} ===", flush=True)
     results = {}
@@ -188,7 +190,7 @@ def run_network(net, out_dir, device):
         B = k * C; t0 = time.time()
         r_c1 = c1_floor_k(graph, B, N_TRIALS)
         r_c2 = c2_myopic_k(graph, B, N_TRIALS, V, A, P, cb, ib)
-        r_c3 = c3_pagerank_k(arm_b, graph, B, N_TRIALS, device)
+        r_c3 = c3_pagerank_k(arm_b, graph, cache, ei, B, N_TRIALS, device)
         results[k] = {"C1_floor_greedy": _stats(r_c1),
                       "C2_myopic_caldp":  _stats(r_c2),
                       "C3_pagerank_pol":  _stats(r_c3)}
