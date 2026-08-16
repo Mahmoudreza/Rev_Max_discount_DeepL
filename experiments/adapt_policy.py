@@ -38,7 +38,7 @@ from src.utils.helpers import set_seed
 from _arm_b_utils import _feat_unconstrained, make_ei as _make_ei
 
 # ── Hyper-params (Phase 2 recipe) ─────────────────────────────────────────────
-LR          = 5e-4
+LR          = 5e-5   # fine-tuning from strong checkpoint — 10× lower than Phase-2 training LR
 CLIP_GRAD   = 1.0
 ENTROPY_C   = 0.005
 N_EPOCHS    = 50     # 50 × 10 = 500 on-graph episodes (sample-efficiency claim)
