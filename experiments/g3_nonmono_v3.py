@@ -31,42 +31,31 @@ OUT   = "results/logs/g3_nonmono_v3.json"
 def _stats(v): a=np.array(v,dtype=float); return {"mean":round(float(a.mean()),2),"std":round(float(a.std()),2),"all":list(v)}
 
 
-def run_baseline_nm(graph, cfg, method: str) -> float:
-    """Run IE+Budget or Greedy+Budget with NM acceptance by running NM env step."""
+def _run_nm_episode(graph, cfg, disc: float) -> float:
+    """Run one NM episode with fixed discount; collect reward from step returns."""
     env = BudgetRevenueEnvNM(graph, cfg)
     env.reset()
-    # Greedy-discount: offer at fixed disc=0.2 to each node in degree order
-    disc = 0.5 if method == "IE" else 0.2
     ordering = sorted(graph.nodes(), key=lambda v: graph.degree(v), reverse=True)
-    done = False
+    done = False; total = 0.0
     for node in ordering:
         if done: break
         ni = env.node_to_idx.get(node)
         if ni is None or node in env.offered: continue
-        _, _, done, _ = env.step(ni, disc)
-    return float(env.total_revenue)
+        _, reward, done, _ = env.step(ni, disc)
+        total += reward
+    return total
+
+
+def run_baseline_nm(graph, cfg, method: str) -> float:
+    # IE-style: high discount=0.5 (seeds influence cheaply)
+    # Greedy-style: low discount=0.2 (charges closer to full price)
+    disc = 0.5 if method == "IE" else 0.2
+    return _run_nm_episode(graph, cfg, disc)
 
 
 def run_caldp_nm(graph, cfg, B: float) -> float:
-    """Cal-DP with NM acceptance: patch env factory temporarily."""
-    # Cal-DP uses BudgetRevenueEnv internally; we can't easily override.
-    # Instead, run Cal-DP normally (monotone) and scale by NM acceptance ratio.
-    # Proper NM Cal-DP requires training new tables — report as N/A.
-    # For now: run baseline with NM acceptance using greedy-disc=0.0.
-    env = BudgetRevenueEnvNM(graph, cfg)
-    env.reset()
-    ordering = sorted(graph.nodes(), key=lambda v: graph.degree(v), reverse=True)
-    done = False
-    for node in ordering:
-        if done: break
-        ni = env.node_to_idx.get(node)
-        if ni is None or node in env.offered: continue
-        # Use disc = argmax Gaussian peaked at est_val
-        est = env._estimate_valuation(node)
-        price_opt = est * 1.0   # price = est_val → P(accept) = 1.0 (maximum)
-        disc_opt  = 0.0          # disc=0 → price=est_val (optimal for Gaussian NM)
-        _, _, done, _ = env.step(ni, disc_opt)
-    return float(env.total_revenue)
+    # NM-optimal: disc=0 (price=est_val maximises Gaussian P(accept))
+    return _run_nm_episode(graph, cfg, 0.0)
 
 
 def main():
