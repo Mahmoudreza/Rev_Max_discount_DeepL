@@ -46,7 +46,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     LOG=/tmp/blockA_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
     CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
-        experiments/budget_sweep_10seed.py --networks "$NET" --gpu "$GPU" \
+        experiments/budget_sweep_10seed.py --networks "$NET" --gpu 0 \
         > "$LOG" 2>&1 &
     PIDS_A+=($!)
 done
@@ -55,7 +55,7 @@ done
 echo "[B] Ablation unconstrained 10-seed"
 GPU=$(nxt_gpu); LOG=/tmp/blockB.log
 CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
-    experiments/ablation_unc_10seed.py --gpu "$GPU" \
+    experiments/ablation_unc_10seed.py --gpu 0 \
     > "$LOG" 2>&1 &
 PIDS_ALL+=($!)
 echo "    → GPU $GPU  $LOG"
@@ -67,7 +67,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     LOG=/tmp/blockC_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
     CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
-        experiments/controls_10seed.py --networks "$NET" --gpu "$GPU" \
+        experiments/controls_10seed.py --networks "$NET" --gpu 0 \
         > "$LOG" 2>&1 &
     PIDS_ALL+=($!)
 done
@@ -85,7 +85,7 @@ echo "    → CPU  $LOG"
 echo "[E] Misspecification"
 GPU=$(nxt_gpu); LOG=/tmp/blockE.log
 CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
-    experiments/misspec_eval.py --gpu "$GPU" \
+    experiments/misspec_eval.py --gpu 0 \
     > "$LOG" 2>&1 &
 PIDS_ALL+=($!)
 echo "    → GPU $GPU  $LOG"
@@ -97,7 +97,7 @@ for NET in polblogs FF_1000 Rice_FB Modular_FF FF_2000; do
     LOG=/tmp/blockD1_${NET}.log
     echo "    $NET → GPU $GPU  $LOG"
     CUDA_VISIBLE_DEVICES=$GPU nohup "$PYTHON" -u \
-        experiments/adapt_policy.py --networks "$NET" --gpu "$GPU" \
+        experiments/adapt_policy.py --networks "$NET" --gpu 0 \
         > "$LOG" 2>&1 &
     PIDS_ALL+=($!)
 done
