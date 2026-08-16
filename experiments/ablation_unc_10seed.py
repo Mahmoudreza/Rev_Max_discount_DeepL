@@ -59,9 +59,8 @@ def _sha8(p):
 
 def _load_lstm_policy(ckpt, device, in_dim=21):
     enc  = GraphSAGEEncoder(in_dim=in_dim, hidden_dim=64, n_layers=2)
-    lstm = EpisodeLSTM(input_size=3, hidden_size=64)
-    pol  = SequentialJointPolicy(encoder=enc, episode_rnn=lstm,
-                                 n_nodes_max=2500, n_tiers=5)
+    lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
+    pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
     pol.load_state_dict(torch.load(ckpt, map_location="cpu"))
     pol.eval(); pol.to(device)
     return pol

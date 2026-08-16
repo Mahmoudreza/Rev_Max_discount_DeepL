@@ -61,8 +61,8 @@ def _sha8(p): return hashlib.sha256(open(p,"rb").read()).hexdigest()[:8]
 def load_arm_b(device):
     assert _sha8(ARM_B_CKPT) == ARM_B_SHA
     enc = GraphSAGEEncoder(in_dim=21, hidden_dim=64, n_layers=2)
-    lstm = EpisodeLSTM(input_size=3, hidden_size=64)
-    pol  = SequentialJointPolicy(encoder=enc, episode_rnn=lstm, n_nodes_max=2500, n_tiers=5)
+    lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
+    pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
     pol.load_state_dict(torch.load(ARM_B_CKPT, map_location="cpu"))
     pol.eval(); pol.to(device); return pol
 

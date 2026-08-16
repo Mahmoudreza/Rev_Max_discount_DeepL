@@ -64,9 +64,8 @@ def load_graph(net):
 def load_fresh(device):
     assert _sha8(ARM_B) == ARM_B_SHA, f"sha mismatch: got {_sha8(ARM_B)}"
     enc  = GraphSAGEEncoder(in_dim=21, hidden_dim=64, n_layers=2)
-    lstm = EpisodeLSTM(input_size=3, hidden_size=64)
-    pol  = SequentialJointPolicy(encoder=enc, episode_rnn=lstm,
-                                 n_nodes_max=2500, n_tiers=5)
+    lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
+    pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
     pol.load_state_dict(torch.load(ARM_B, map_location="cpu"))
     pol.to(device); return pol
 
