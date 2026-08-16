@@ -94,7 +94,8 @@ def run_ep_fixed(pol, graph, cache, ei, seed, device):
     set_seed(seed)
     n, nodes = graph.number_of_nodes(), list(graph.nodes())
     deg_ord = sorted(range(n), key=lambda i: graph.degree(nodes[i]), reverse=True)
-    env = RevenueEnv(graph, seed=seed)
+    from src.env.revenue_env import RevenueEnvConfig
+    env = RevenueEnv(graph, RevenueEnvConfig(seed=seed))
     env.reset(); pol.reset_episode(device)
     for pos in deg_ord:
         if not env.available_nodes: break

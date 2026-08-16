@@ -114,10 +114,10 @@ def eval_arm_b_episode_unc(pol, graph, cache, ei, seed, device):
     Run one arm_b episode on RevenueEnv (unconstrained).
     Returns total_revenue (float).
     """
-    from src.env.revenue_env import RevenueEnv
+    from src.env.revenue_env import RevenueEnv, RevenueEnvConfig
     set_seed(seed)
     n = graph.number_of_nodes()
-    env = RevenueEnv(graph, seed=seed)
+    env = RevenueEnv(graph, RevenueEnvConfig(seed=seed))
     env.reset()
     pol.reset_episode(device)
     while env.available_nodes:
