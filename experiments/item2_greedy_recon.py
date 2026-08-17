@@ -64,7 +64,7 @@ def _stats(v):
     return {"mean": round(float(a.mean()),2), "std": round(float(a.std()),2)}
 
 
-def _load_c1_policy(device, in_dim=21):
+def _load_c1_policy(device, in_dim=20):
     enc  = GraphSAGEEncoder(in_dim=in_dim, hidden_dim=64, n_layers=2)
     lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
     pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
