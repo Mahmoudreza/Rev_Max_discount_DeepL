@@ -26,9 +26,9 @@ from src.evaluation.baselines import greedy_discount
 from src.env.graph_generators import (
     generate_forest_fire, generate_modular_forest_fire, load_rice_facebook,
 )
-from src.models.sequential_policy import SequentialJointPolicy
-from src.models.encoders import GraphSAGEEncoder
-from src.models.lstm_context import EpisodeLSTM
+from src.models.policies.sequential_joint_policy import SequentialJointPolicy
+from src.models.encoders.graphsage import GraphSAGEEncoder
+from src.models.encoders.sequence_models import EpisodeLSTM
 from experiments._arm_b_utils import (
     make_ei, _feat_unconstrained, _avail_mask,
 )

@@ -24,9 +24,9 @@ sys.path.insert(0, _ROOT)
 
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
 from src.env.graph_generators import (
-    generate_forest_fire, generate_modular_forest_fire,
-    load_polblogs, load_rice_facebook,
+    generate_forest_fire, generate_modular_forest_fire, load_rice_facebook,
 )
+from src.env.polblogs_loader import load_polblogs
 from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table
 from src.evaluation.dp_calibrated import _deg_class
 
