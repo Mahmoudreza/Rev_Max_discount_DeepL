@@ -20,6 +20,7 @@ import torch
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
+from omegaconf import OmegaConf
 from src.env.revenue_env import RevenueEnvConfig
 from src.evaluation.idea1_eval import _eval_greedy_discount
 from src.evaluation.baselines import greedy_discount
@@ -53,6 +54,15 @@ GRAPHS = {
     "Modular":  lambda: generate_modular_forest_fire([250,250],0.37,0.32,0.05,seed=0),
     "Rice_FB":  load_rice_facebook,
 }
+
+
+def _make_hydra_cfg(seed: int):
+    """OmegaConf cfg compatible with baselines._make_env (needs cfg.influence/reward/project)."""
+    return OmegaConf.create({
+        "influence": {"model": "monotone", "b": 1.0, "weight_low": 0.0, "weight_high": 2.0, "n_mc_samples": 200},
+        "reward":    {"type": "flat", "gamma": 1.0},
+        "project":   {"seed": seed},
+    })
 
 
 def _sha8(path):
@@ -119,10 +129,10 @@ def main():
         graph = loader()
         ei, cache = make_ei(graph, device)
 
-        cfg42 = RevenueEnvConfig(seed=42)
+        cfg42 = _make_hydra_cfg(42)
         gd_correct_s42  = float(_eval_greedy_discount(graph, cfg42))
         gd_inflated_s42 = float(greedy_discount(graph, cfg42))
-        gd_correct_10s  = [float(_eval_greedy_discount(graph, RevenueEnvConfig(seed=s))) for s in SEEDS]
+        gd_correct_10s  = [float(_eval_greedy_discount(graph, _make_hydra_cfg(s))) for s in SEEDS]
         lstm_10s         = [_run_lstm_unc(pol, graph, cache, ei, s, device) for s in SEEDS]
 
         gd10  = _stats(gd_correct_10s)
