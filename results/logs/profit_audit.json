@@ -1,0 +1,353 @@
+{
+  "n_flagged": 0,
+  "n_total": 0,
+  "flagged_cells": [],
+  "all_results": {
+    "budget_10s_polblogs.json": {
+      "5": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "10": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "15": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "20": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "30": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "40": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      }
+    },
+    "budget_10s_Modular_FF.json": {
+      "5": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "10": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "15": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "20": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "30": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "40": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      }
+    },
+    "budget_10s_FF_1000.json": {
+      "5": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "10": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "15": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "20": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "30": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "40": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      }
+    },
+    "budget_10s_FF_2000.json": {
+      "5": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "10": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "15": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "20": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "30": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "40": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      }
+    },
+    "budget_10s_FF_2000_gnn.json": {},
+    "budget_10s_Rice_FB.json": {
+      "5": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "10": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "15": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "20": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "30": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      },
+      "40": {
+        "IE+Budget": {},
+        "Greedy+Budget": {},
+        "Cal-DP": {},
+        "Rev-GNN-LSTM": {}
+      }
+    },
+    "budget_sweep_polblogs_k20-30-40.json": {
+      "polblogs": {
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_IE_FF_2000_k5-10-15-20-30-40.json": {
+      "FF_2000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_FF_1000_k5-10-15-20-30-40.json": {
+      "FF_1000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_polblogs_k5_manual.json": {
+      "polblogs": {
+        "5": {}
+      }
+    },
+    "budget_sweep_IE_Rice_FB_k5-10-15-20-30-40.json": {
+      "Rice_FB": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_IE_polblogs_k20-30-40.json": {
+      "polblogs": {
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_IE_Modular_FF_k5-10-15-20-30-40.json": {
+      "Modular_FF": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_IE_polblogs_k5-10-15.json": {
+      "polblogs": {
+        "5": {},
+        "10": {},
+        "15": {}
+      }
+    },
+    "budget_sweep_all_networks.json": {
+      "polblogs": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      },
+      "FF_1000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      },
+      "Rice_FB": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      },
+      "Modular_FF": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      },
+      "FF_2000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_Rice_FB_k5-10-15-20-30-40.json": {
+      "Rice_FB": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_IE_FF_1000_k5-10-15-20-30-40.json": {
+      "FF_1000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_polblogs_k5-10-15.json": {
+      "polblogs": {
+        "5": {},
+        "10": {},
+        "15": {}
+      }
+    },
+    "budget_sweep_Modular_FF_k5-10-15-20-30-40.json": {
+      "Modular_FF": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    },
+    "budget_sweep_FF_2000_k5-10-15-20-30-40.json": {
+      "FF_2000": {
+        "5": {},
+        "10": {},
+        "15": {},
+        "20": {},
+        "30": {},
+        "40": {}
+      }
+    }
+  }
+}
