@@ -187,11 +187,11 @@ def run_existing_budget(pol, G, cache, ei, B0, seed, device):
 
     while getattr(env, 'available_nodes', None) is not None and \
           len(env.available_nodes) > 0 and not env._check_bankrupt():
-        if use_budget_feat:
-            feats = _cbf(cache, env.S, set(env.offered), env.t, n, env)
-        else:
-            feats20 = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
-            feats = np.concatenate([feats20, np.zeros((feats20.shape[0], 1))], axis=1)
+        feats20 = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
+        # 21st feature: budget fraction remaining (what budget-trained model expects)
+        bfrac = np.full((n, 1), max(0.0, getattr(env, 'budget_B', B0) / B0
+                                    if hasattr(env, 'budget_B') else 1.0))
+        feats = np.concatenate([feats20, bfrac], axis=1)
         x  = torch.tensor(feats[:, :21], dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
         if not av.any(): break
@@ -243,14 +243,27 @@ def run_cgs_budget(G, B0, seeds):
 
 # ── IE+Budget and Greedy+Budget baselines ─────────────────────────────────────
 
+def _flat(v, default=0.0):
+    """Recursively flatten a potentially nested dict/list to a scalar."""
+    if isinstance(v, (int, float)): return float(v)
+    if isinstance(v, dict):
+        for k in ('mean', 'revenue', 'mean_revenue', 'value'):
+            if k in v: return _flat(v[k])
+        return default
+    if isinstance(v, (list, tuple)) and v: return float(v[0])
+    return default
+
 def run_ie_budget(G, B0, seeds):
     revs=[]; profits=[]; bcs=[]; s_ts=[]
     try:
         from src.evaluation.budget_baselines import efficiency_greedy_budget
         for seed in seeds:
             res = efficiency_greedy_budget(G, B=B0, c=C, n_trials=1)
-            rev = float(res.get('revenue', res.get('mean_revenue', 0.0))) if isinstance(res,dict) else float(res)
-            s_t = int(res.get('n_sales', 0)) if isinstance(res,dict) else 0
+            if isinstance(res, dict):
+                rev = _flat(res.get('revenue', res.get('mean_revenue', 0.0)))
+                s_t = int(_flat(res.get('n_sales', res.get('num_sales', 0))))
+            else:
+                rev = float(res); s_t = 0
             revs.append(rev); profits.append(rev - C*s_t)
             bcs.append(0); s_ts.append(s_t)
     except Exception as e:
@@ -265,8 +278,11 @@ def run_greedy_budget(G, B0, seeds):
         from src.evaluation.budget_baselines import greedy_discount_budget
         for seed in seeds:
             res = greedy_discount_budget(G, B=B0, c=C, n_trials=1)
-            rev = float(res.get('revenue', res.get('mean_revenue', 0.0))) if isinstance(res,dict) else float(res)
-            s_t = int(res.get('n_sales', 0)) if isinstance(res,dict) else 0
+            if isinstance(res, dict):
+                rev = _flat(res.get('revenue', res.get('mean_revenue', 0.0)))
+                s_t = int(_flat(res.get('n_sales', res.get('num_sales', 0))))
+            else:
+                rev = float(res); s_t = 0
             revs.append(rev); profits.append(rev - C*s_t)
             bcs.append(0); s_ts.append(s_t)
     except Exception as e:
