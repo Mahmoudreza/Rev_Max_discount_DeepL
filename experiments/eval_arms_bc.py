@@ -56,7 +56,12 @@ def _make_pol():
 def load_pol(path, device):
     pol = _make_pol().to(device)
     ckpt = torch.load(path, map_location=device)
-    pol.load_state_dict(ckpt['policy_state_dict'])
+    # Try common key names, then assume raw state dict
+    for key in ('policy_state_dict', 'model_state_dict', 'state_dict'):
+        if isinstance(ckpt, dict) and key in ckpt:
+            pol.load_state_dict(ckpt[key]); break
+    else:
+        pol.load_state_dict(ckpt)   # raw state dict
     pol.eval()
     return pol
 
