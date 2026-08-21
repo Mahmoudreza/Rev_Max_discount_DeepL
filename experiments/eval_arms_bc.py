@@ -151,10 +151,11 @@ def run_pol_greedy(pol, G, seed, device, force_degree_order=False):
     return total, chosen
 
 def run_greedy_discount(G, seed):
-    """Greedy-Discount baseline revenue."""
+    """Greedy-Discount baseline. Uses MC=5 (same as training) — O(n²×MC) is too
+    slow at MC=200.  Policy evals still use MC=200."""
     from omegaconf import OmegaConf
     cfg = OmegaConf.create({"influence":{"model":"monotone","b":1.0,"weight_low":0.0,
-                             "weight_high":2.0,"n_mc_samples":MC},
+                             "weight_high":2.0,"n_mc_samples":5},
                              "reward":{"type":"flat","gamma":1.0},"budget":{"k":50},
                              "project":{"seed":seed}})
     set_seed(seed)
