@@ -155,27 +155,20 @@ def run_pol_budget(pol, G, cache, ei, B0, seed, device):
             revenue += r
         if done: break
 
-    S_T   = len(env.S)
-    B_rem = float(getattr(env, 'budget_B', B0) if hasattr(env, 'budget_B') else
-                  getattr(env, '_budget', B0))
+    S_T    = len(env.S)
+    B_rem  = float(env.B)   # env.B = remaining budget; B_T - B0 = R - c|S_T| = Pi
     profit = revenue - C * S_T
-    # Assert Pi = B_T - B0 (within float tolerance)
-    pi_from_budget = B_rem - B0
-    mismatch = abs(profit - pi_from_budget)
-    return revenue, profit, n_below, S_T, B_rem, mismatch
+    pi_check = B_rem - B0
+    assert abs(profit - pi_check) < 0.01 + 0.001 * abs(profit), \
+        f"Pi identity FAIL: profit={profit:.3f} B_T-B0={pi_check:.3f}"
+    return revenue, profit, n_below, S_T
 
 # ── budget episode runner for existing LSTM (budget-trained, in_dim=21) ───────
 
 def run_existing_budget(pol, G, cache, ei, B0, seed, device):
     """Run budget episode for budget-trained LSTM (0b549f93, in_dim=21).
-    Uses compute_budget_node_features if available, else pads to 21.
+    Budget fraction (env.B / B0) used as 21st feature.
     """
-    try:
-        from src.utils.budget_features import compute_budget_node_features as _cbf
-        use_budget_feat = True
-    except ImportError:
-        use_budget_feat = False
-
     set_seed(seed)
     cfg = BudgetEnvConfig(budget_B=B0, production_cost=C, seed=seed,
                           weight_high=W_HIGH, n_mc_samples=N_MC)
@@ -183,14 +176,12 @@ def run_existing_budget(pol, G, cache, ei, B0, seed, device):
     nodes = list(G.nodes()); n = len(nodes)
     ei_d = ei.to(device)
     pol.reset_episode(device)
-    revenue = 0.0; n_below = 0; n_accepted = 0
+    revenue = 0.0; n_below = 0
 
     while getattr(env, 'available_nodes', None) is not None and \
           len(env.available_nodes) > 0 and not env._check_bankrupt():
         feats20 = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
-        # 21st feature: budget fraction remaining (what budget-trained model expects)
-        bfrac = np.full((n, 1), max(0.0, getattr(env, 'budget_B', B0) / B0
-                                    if hasattr(env, 'budget_B') else 1.0))
+        bfrac = np.full((n, 1), max(0.0, env.B / B0))   # budget fraction remaining
         feats = np.concatenate([feats20, bfrac], axis=1)
         x  = torch.tensor(feats[:, :21], dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
@@ -204,19 +195,18 @@ def run_existing_budget(pol, G, cache, ei, B0, seed, device):
         v = nodes[sel]
         _, r, done, info = env.step(env.node_to_idx[v], disc)
         if r > 0:
-            n_accepted += 1
             price = float(info.get('offered_price', r))
             if price < C: n_below += 1
             revenue += r
         if done: break
 
     S_T    = len(env.S)
-    B_rem  = float(getattr(env, 'budget_B', B0) if hasattr(env, 'budget_B') else
-                   getattr(env, '_budget', B0))
+    B_rem  = float(env.B)
     profit = revenue - C * S_T
-    pi_from_budget = B_rem - B0
-    mismatch = abs(profit - pi_from_budget)
-    return revenue, profit, n_below, S_T, B_rem, mismatch
+    pi_check = B_rem - B0
+    assert abs(profit - pi_check) < 0.01 + 0.001 * abs(profit), \
+        f"Pi identity FAIL: profit={profit:.3f} B_T-B0={pi_check:.3f}"
+    return revenue, profit, n_below, S_T
 
 # ── CGS baseline ───────────────────────────────────────────────────────────────
 
@@ -243,53 +233,50 @@ def run_cgs_budget(G, B0, seeds):
 
 # ── IE+Budget and Greedy+Budget baselines ─────────────────────────────────────
 
-def _flat(v, default=0.0):
-    """Recursively flatten a potentially nested dict/list to a scalar."""
-    if isinstance(v, (int, float)): return float(v)
-    if isinstance(v, dict):
-        for k in ('mean', 'revenue', 'mean_revenue', 'value'):
-            if k in v: return _flat(v[k])
-        return default
-    if isinstance(v, (list, tuple)) and v: return float(v[0])
-    return default
+def _extract_bl(res, n):
+    """Extract per-trial arrays from aggregated baseline result dict.
+    budget_baselines._aggregate returns {"key": {"mean":X, "std":Y, "all":[r0..rN-1]}}.
+    Keys used: revenue, n_paid_accepted (or n_accepted), n_subsidized.
+    """
+    if not isinstance(res, dict):
+        return [float(res)]*n, [0]*n, [0]*n
+    revs = res.get('revenue', {})
+    revs = revs.get('all', [revs.get('mean', 0.0)]*n) if isinstance(revs,dict) else [float(revs)]*n
+    ns_d = res.get('n_paid_accepted', res.get('n_accepted', res.get('n_sales', {})))
+    ns   = ns_d.get('all', [ns_d.get('mean', 0)]*n) if isinstance(ns_d,dict) else [int(ns_d)]*n
+    bc_d = res.get('n_subsidized', res.get('n_below_cost', {}))
+    bcs  = bc_d.get('all', [bc_d.get('mean', 0)]*n) if isinstance(bc_d,dict) else [int(bc_d)]*n
+    # Pad/trim to exactly n
+    def _pad(lst): return (list(lst)+[float('nan')]*n)[:n]
+    return _pad(revs), _pad(ns), _pad(bcs)
 
 def run_ie_budget(G, B0, seeds):
-    revs=[]; profits=[]; bcs=[]; s_ts=[]
+    n = len(seeds)
     try:
         from src.evaluation.budget_baselines import efficiency_greedy_budget
-        for seed in seeds:
-            res = efficiency_greedy_budget(G, B=B0, c=C, n_trials=1)
-            if isinstance(res, dict):
-                rev = _flat(res.get('revenue', res.get('mean_revenue', 0.0)))
-                s_t = int(_flat(res.get('n_sales', res.get('num_sales', 0))))
-            else:
-                rev = float(res); s_t = 0
-            revs.append(rev); profits.append(rev - C*s_t)
-            bcs.append(0); s_ts.append(s_t)
+        res = efficiency_greedy_budget(G, B0, C, n_trials=n)
+        revs, ns, bcs = _extract_bl(res, n)
+        profits = [r - C*s for r,s in zip(revs, ns)]
+        s_ts = [int(s) for s in ns]
+        return revs, profits, bcs, s_ts
     except Exception as e:
         print(f"  IE error: {e}", flush=True)
-        revs=[float('nan')]*len(seeds); profits=revs[:]
-        bcs=[float('nan')]*len(seeds); s_ts=bcs[:]
-    return revs, profits, bcs, s_ts
+        nan = [float('nan')]*n
+        return nan, nan, nan, nan
 
 def run_greedy_budget(G, B0, seeds):
-    revs=[]; profits=[]; bcs=[]; s_ts=[]
+    n = len(seeds)
     try:
         from src.evaluation.budget_baselines import greedy_discount_budget
-        for seed in seeds:
-            res = greedy_discount_budget(G, B=B0, c=C, n_trials=1)
-            if isinstance(res, dict):
-                rev = _flat(res.get('revenue', res.get('mean_revenue', 0.0)))
-                s_t = int(_flat(res.get('n_sales', res.get('num_sales', 0))))
-            else:
-                rev = float(res); s_t = 0
-            revs.append(rev); profits.append(rev - C*s_t)
-            bcs.append(0); s_ts.append(s_t)
+        res = greedy_discount_budget(G, B=B0, c=C, n_trials=n)
+        revs, ns, bcs = _extract_bl(res, n)
+        profits = [r - C*s for r,s in zip(revs, ns)]
+        s_ts = [int(s) for s in ns]
+        return revs, profits, bcs, s_ts
     except Exception as e:
         print(f"  Greedy+Budget error: {e}", flush=True)
-        revs=[float('nan')]*len(seeds); profits=revs[:]
-        bcs=[float('nan')]*len(seeds); s_ts=bcs[:]
-    return revs, profits, bcs, s_ts
+        nan = [float('nan')]*n
+        return nan, nan, nan, nan
 
 # ── result helpers ─────────────────────────────────────────────────────────────
 
@@ -319,26 +306,26 @@ def run_network(net_name, pols, device, kappas):
         kr = {}
 
         for m_name, (pol, runner) in pols.items():
-            revs=[]; profits=[]; bcs=[]; s_ts=[]; mismatches=[]
+            revs=[]; profits=[]; bcs=[]; s_ts=[]
             for seed in SEEDS:
                 try:
-                    rev, profit, n_bc, s_t, b_rem, mm = runner(pol, G, cache, ei, B0, seed, device)
+                    rev, profit, n_bc, s_t = runner(pol, G, cache, ei, B0, seed, device)
                     revs.append(rev); profits.append(profit)
-                    bcs.append(n_bc); s_ts.append(s_t); mismatches.append(mm)
+                    bcs.append(n_bc); s_ts.append(s_t)
+                except AssertionError as ae:
+                    print(f"    {m_name} seed={seed} Pi-ASSERT: {ae}", flush=True)
+                    revs.append(float('nan')); profits.append(float('nan'))
+                    bcs.append(float('nan')); s_ts.append(float('nan'))
                 except Exception as e:
                     print(f"    {m_name} seed={seed} error: {e}", flush=True)
                     revs.append(float('nan')); profits.append(float('nan'))
                     bcs.append(float('nan')); s_ts.append(float('nan'))
-                    mismatches.append(float('nan'))
-            max_mm = max((x for x in mismatches if x==x), default=0.0)
             kr[m_name] = {"profit": _cell(profits), "revenue": _cell(revs),
-                          "n_below_cost": _cell(bcs), "S_T": _cell(s_ts),
-                          "Pi_assert_max_mismatch": round(max_mm, 6)}
+                          "n_below_cost": _cell(bcs), "S_T": _cell(s_ts)}
             print(f"    {m_name:20s}  Pi={_fmt(kr[m_name]['profit'])}  "
                   f"rev={_fmt(kr[m_name]['revenue'])}  "
                   f"below={kr[m_name]['n_below_cost']['mean']:5.1f}  "
-                  f"|S|={kr[m_name]['S_T']['mean']:5.1f}  "
-                  f"[assert_mm={max_mm:.4f}]", flush=True)
+                  f"|S|={kr[m_name]['S_T']['mean']:5.1f}", flush=True)
 
         # Baselines (CPU)
         for bl_name, bl_fn in [("IE+Budget", run_ie_budget),
