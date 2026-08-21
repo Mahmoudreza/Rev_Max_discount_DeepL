@@ -48,20 +48,25 @@ C_PROD   = 0.3
 
 # ── model helpers ─────────────────────────────────────────────────────────────
 
-def _make_pol():
-    enc  = GraphSAGEEncoder(in_dim=20, hidden_dim=HID, n_layers=2)
+def _make_pol(in_dim=20):
+    enc  = GraphSAGEEncoder(in_dim=in_dim, hidden_dim=HID, n_layers=2)
     lstm = EpisodeLSTM(graph_dim=HID, lstm_hidden=HID, n_layers=1)
     return SequentialJointPolicy(enc, lstm, gnn_dim=HID, context_dim=HID)
 
 def load_pol(path, device):
-    pol = _make_pol().to(device)
     ckpt = torch.load(path, map_location=device)
-    # Try common key names, then assume raw state dict
     for key in ('policy_state_dict', 'model_state_dict', 'state_dict'):
         if isinstance(ckpt, dict) and key in ckpt:
-            pol.load_state_dict(ckpt[key]); break
+            sd = ckpt[key]; break
     else:
-        pol.load_state_dict(ckpt)   # raw state dict
+        sd = ckpt
+    # Detect in_dim from first layer weight shape
+    w = sd.get('encoder.input_proj.weight',
+               sd.get('encoder.layers.0.weight', None))
+    in_dim = int(w.shape[1]) if w is not None else 20
+    pol = _make_pol(in_dim=in_dim).to(device)
+    pol.load_state_dict(sd)
+    pol._in_dim = in_dim   # stash for episode runners
     pol.eval()
     return pol
 
@@ -120,7 +125,8 @@ def run_pol_greedy(pol, G, seed, device, force_degree_order=False):
         avail = [v for v in nodes if v not in env.offered]
         if not avail: break
         feats = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
-        x  = torch.tensor(feats, dtype=torch.float32, device=device)
+        in_d  = getattr(pol, '_in_dim', 20)
+        x  = torch.tensor(feats[:, :in_d], dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
         # Single forward per step — LSTM advances once; h used for both selection + pricing
         with torch.no_grad():
@@ -174,7 +180,8 @@ def run_pol_budget(pol, G, seed, kappa, device):
         avail = [v for v in nodes if v not in env.offered]
         if not avail or getattr(env, '_check_bankrupt', lambda: False)(): break
         feats = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
-        x  = torch.tensor(feats, dtype=torch.float32, device=device)
+        in_d  = getattr(pol, '_in_dim', 20)
+        x  = torch.tensor(feats[:, :in_d], dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
         with torch.no_grad():
             ms, h, ctx, _ = pol.forward(x, ei, av)
