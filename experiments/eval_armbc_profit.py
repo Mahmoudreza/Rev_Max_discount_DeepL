@@ -236,17 +236,23 @@ def run_cgs_budget(G, B0, seeds):
 def _extract_bl(res, n):
     """Extract per-trial arrays from aggregated baseline result dict.
     budget_baselines._aggregate returns {"key": {"mean":X, "std":Y, "all":[r0..rN-1]}}.
-    Keys used: revenue, n_paid_accepted (or n_accepted), n_subsidized.
+
+    CRITICAL: use n_in_S (= len(env.S), free + paid) NOT n_accepted (paid only).
+    Free seeds (price=0) are accepted and cost c but contribute 0 revenue.
+    Definition 3.4: profit = R - c * |S_T|, and |S_T| = n_in_S.
+    Using n_accepted (paid only) overestimates profit because free seeds are missed.
+    The budget identity B_T-B0 = R - c*n_in_S confirms n_in_S is correct.
     """
     if not isinstance(res, dict):
         return [float(res)]*n, [0]*n, [0]*n
-    revs = res.get('revenue', {})
-    revs = revs.get('all', [revs.get('mean', 0.0)]*n) if isinstance(revs,dict) else [float(revs)]*n
-    ns_d = res.get('n_paid_accepted', res.get('n_accepted', res.get('n_sales', {})))
-    ns   = ns_d.get('all', [ns_d.get('mean', 0)]*n) if isinstance(ns_d,dict) else [int(ns_d)]*n
-    bc_d = res.get('n_subsidized', res.get('n_below_cost', {}))
-    bcs  = bc_d.get('all', [bc_d.get('mean', 0)]*n) if isinstance(bc_d,dict) else [int(bc_d)]*n
-    # Pad/trim to exactly n
+    def _arr(d, default=0.0):
+        if not isinstance(d, dict): return [float(d if d else default)]*n
+        return d.get('all', [d.get('mean', default)]*n)
+
+    revs = _arr(res.get('revenue', {}))
+    # n_in_S = free + paid (correct); fallback to n_accepted if not present
+    ns   = _arr(res.get('n_in_S', res.get('n_accepted', {})), default=0.0)
+    bcs  = _arr(res.get('n_subsidized', res.get('n_below_cost', {})), default=0.0)
     def _pad(lst): return (list(lst)+[float('nan')]*n)[:n]
     return _pad(revs), _pad(ns), _pad(bcs)
 
