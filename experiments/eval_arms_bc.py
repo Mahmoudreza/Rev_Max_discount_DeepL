@@ -126,7 +126,10 @@ def run_pol_greedy(pol, G, seed, device, force_degree_order=False):
         if not avail: break
         feats = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
         in_d  = getattr(pol, '_in_dim', 20)
-        x  = torch.tensor(feats[:, :in_d], dtype=torch.float32, device=device)
+        # Pad with zeros if checkpoint expects more features than available
+        f = feats[:, :in_d] if in_d <= feats.shape[1] else \
+            np.concatenate([feats, np.zeros((feats.shape[0], in_d-feats.shape[1]))], axis=1)
+        x  = torch.tensor(f, dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
         # Single forward per step — LSTM advances once; h used for both selection + pricing
         with torch.no_grad():
@@ -185,7 +188,9 @@ def run_pol_budget(pol, G, seed, kappa, device):
         if not avail or getattr(env, '_check_bankrupt', lambda: False)(): break
         feats = compute_node_features_fast(cache, env.S, set(env.offered), env.t, n, env)
         in_d  = getattr(pol, '_in_dim', 20)
-        x  = torch.tensor(feats[:, :in_d], dtype=torch.float32, device=device)
+        f = feats[:, :in_d] if in_d <= feats.shape[1] else \
+            np.concatenate([feats, np.zeros((feats.shape[0], in_d-feats.shape[1]))], axis=1)
+        x  = torch.tensor(f, dtype=torch.float32, device=device)
         av = torch.tensor([v not in env.offered for v in nodes], dtype=torch.bool, device=device)
         with torch.no_grad():
             ms, h, ctx, _ = pol.forward(x, ei, av)
