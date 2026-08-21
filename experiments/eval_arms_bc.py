@@ -156,7 +156,11 @@ def run_greedy_discount(G, seed):
                              "project":{"seed":seed}})
     set_seed(seed)
     traj = greedy_discount_trajectory(G, cfg)
-    return float(sum(r for _,r,_,_ in traj) if traj else 0.0)
+    def _rev(item):
+        if isinstance(item, dict): return float(item.get('reward', item.get('r', 0.0)))
+        try: _, r, *_ = item; return float(r)
+        except: return 0.0
+    return float(sum(_rev(item) for item in traj) if traj else 0.0)
 
 # ── budget eval ───────────────────────────────────────────────────────────────
 
