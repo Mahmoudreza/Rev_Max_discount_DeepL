@@ -243,7 +243,9 @@ def main():
     ap.add_argument("--ckpt_c",  default="", help="Arm C checkpoint")
     ap.add_argument("--ckpt_p1", default=os.path.join(CKPT, "c1_p1_s1_ep0200.pt"))
     ap.add_argument("--device",  default="cuda:0" if torch.cuda.is_available() else "cpu")
-    ap.add_argument("--skip_arms", action="store_true")
+    ap.add_argument("--skip_arms",   action="store_true")
+    ap.add_argument("--skip_greedy", action="store_true",
+                    help="Skip greedy_discount_trajectory (CPU, O(n^2*MC), slow)")
     args = ap.parse_args()
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
@@ -281,11 +283,13 @@ def main():
         net_res = {}
         for seed in SEEDS:
             G = net_fn(seed)
-            net_res.setdefault("Greedy-Discount", []).append(run_greedy_discount(G, seed))
+            if not args.skip_greedy:
+                net_res.setdefault("Greedy-Discount", []).append(run_greedy_discount(G, seed))
             net_res.setdefault("CGS", []).append(run_cgs(G, seed))
             for m, pol in pols.items():
                 r, _ = run_pol_greedy(pol, G, seed, device)
                 net_res.setdefault(m, []).append(r)
+            print(f"  {net_name:12s} seed={seed} done", flush=True)
 
         all_results[net_name] = {}
         for m, vals in net_res.items():
