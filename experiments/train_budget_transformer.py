@@ -203,15 +203,14 @@ def _build_traj_cache(graphs, seed: int) -> dict:
     tc = {}
     for gi, G in enumerate(graphs):
         for k in K_P1:
-            B0 = k * C
             for s in range(N_SEEDS_P1):
                 try:
-                    traj = generate_budget_expert_trajectory(
-                        G, B0, C, seed=s, weight_high=W_HIGH, n_mc=N_MC)
-                    tc[(gi, k, s)] = traj
-                except Exception:
-                    pass
-        print(f"[traj] graph {gi+1}/{len(graphs)} done", flush=True)
+                    traj = generate_budget_expert_trajectory(G, k, c=C, seed=s)
+                    if traj:
+                        tc[(gi, k, s)] = traj
+                except Exception as e:
+                    print(f"[traj] WARN gi={gi} k={k} s={s}: {e}", flush=True)
+        print(f"[traj] graph {gi+1}/{len(graphs)} done  hits={sum(1 for (gi2,_,_) in tc if gi2==gi)}", flush=True)
     pickle.dump((key_str, tc), open(cache_path, "wb"))
     print(f"[traj] Saved {len(tc)} trajectories → {cache_path}", flush=True)
     return tc
@@ -241,30 +240,34 @@ def phase1(pol, graphs, traj_cache: dict, device, seed: int, save_prefix: str):
                 B0 = k * C
                 for s in range(N_SEEDS_P1):
                     traj = traj_cache.get((gi, k, s))
-                    if traj is None:
+                    if not traj:
                         continue
                     pol.reset_episode(device)
-                    cfg = BudgetEnvConfig(budget_B=B0, production_cost=C,
-                                          seed=s, weight_high=W_HIGH, n_mc_samples=N_MC)
+                    cfg = BudgetEnvConfig(budget_B=B0, production_cost=C, seed=s)
                     env = BudgetRevenueEnv(G, cfg); env.reset()
                     step_losses = []
 
-                    for (t_node, t_disc, t_acc, t_price) in traj:
+                    for step in traj:
+                        expert_idx  = step["node_idx"]
+                        expert_disc = step["discount"]
+                        if expert_idx not in env.available_nodes:
+                            break
                         feats = _features(cache, env, k)
                         x  = torch.tensor(feats, dtype=torch.float32, device=device)
                         av = _avail_mask(env, n, device)
                         if not av.any():
                             break
                         scores, h, ctx, _ = pol.forward(x, ei_t, av)
-                        t_idx = nmap.get(t_node, 0)
                         safe  = scores.clone(); safe[~av] = -1e9
-                        ce    = -torch.log_softmax(safe, dim=-1)[t_idx]
-                        pd    = pol.get_discount_distribution(torch.cat([h[t_idx], ctx]))
-                        mse   = (pd.mean - torch.tensor(t_disc, dtype=torch.float32,
+                        ce    = -torch.log_softmax(safe, dim=-1)[expert_idx]
+                        pd    = pol.get_discount_distribution(
+                            torch.cat([h[expert_idx], ctx]))
+                        mse   = (pd.mean - torch.tensor(expert_disc, dtype=torch.float32,
                                                          device=device)) ** 2
                         step_losses.append(ce + PRICE_ALPHA * mse)
-                        pol.update_sequence_state(t_disc, t_acc, t_price)
-                        _, _, done, _ = env.step(env.node_to_idx[t_node], t_disc)
+                        pol.update_sequence_state(
+                            expert_disc, step["accepted"], step["price"])
+                        _, _, done, _ = env.step(expert_idx, expert_disc)
                         if done:
                             break
 
