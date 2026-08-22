@@ -290,14 +290,12 @@ def phase1(pol, graphs, traj_cache: dict, device, seed: int, save_prefix: str):
                         epoch_loss  += traj_loss.item()
                         epoch_steps += 1
 
-        if ep % 50 == 0:
+        if ep % 20 == 0:
             avg = epoch_loss / max(epoch_steps, 1)
-            print(f"[P1-s{seed}] ep={ep}/{PH1_EPOCHS}  "
-                  f"avg_loss={avg:.4f}  steps={epoch_steps}", flush=True)
-        if ep % 100 == 0:
             sp = save_prefix.replace("_ep.pt", f"_p1_ep{ep}.pt")
             torch.save(pol.state_dict(), sp); _append_readme(sp)
-            print(f"[P1-s{seed}] saved {sp}", flush=True)
+            print(f"[P1-s{seed}] ep={ep}/{PH1_EPOCHS}  "
+                  f"avg_loss={avg:.4f}  steps={epoch_steps}  saved {os.path.basename(sp)}", flush=True)
 
     return pol
 
