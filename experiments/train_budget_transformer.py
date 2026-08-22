@@ -228,14 +228,20 @@ def phase1(pol, graphs, traj_cache: dict, device, seed: int, save_prefix: str):
     print(f"[P1-s{seed}] {PH1_EPOCHS} epochs  "
           f"~{len(graphs)*len(K_P1)*N_SEEDS_P1} grad steps/epoch", flush=True)
 
+    # Pre-build caches ONCE (static features don't change across epochs)
+    graph_caches = [build_graph_feature_cache(G, compute_static_features(G))
+                    for G in graphs]
+    graph_eis    = [_edge_index(G, device) for G in graphs]
+    graph_nodes  = [list(G.nodes()) for G in graphs]
+    print(f"[P1-s{seed}] graph caches pre-built for {len(graphs)} graphs", flush=True)
+
     for ep in range(1, PH1_EPOCHS + 1):
         epoch_loss = 0.0; epoch_steps = 0
 
         for gi, G in enumerate(graphs):
-            cache = build_graph_feature_cache(G, compute_static_features(G))
-            ei_t  = _edge_index(G, device)
-            nodes = list(G.nodes()); n = len(nodes)
-            nmap  = {v: i for i, v in enumerate(nodes)}
+            cache = graph_caches[gi]
+            ei_t  = graph_eis[gi]
+            nodes = graph_nodes[gi]; n = len(nodes)
             k_order = list(K_P1); np.random.shuffle(k_order)   # local copy
 
             for k in k_order:
