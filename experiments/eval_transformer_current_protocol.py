@@ -61,7 +61,7 @@ KAPPAS = [5, 20]
 NETWORKS = {
     "FF_1000":    lambda: generate_forest_fire(1000, 0.37, 0.32, seed=0),
     "FF_2000":    lambda: generate_forest_fire(2000, 0.37, 0.32, seed=1),
-    "Modular_FF": lambda: generate_modular_forest_fire(1000, seed=0),
+    "Modular_FF": lambda: generate_modular_forest_fire([200, 300, 500], 0.37, 0.32, 0.01, seed=0),
     "Rice_FB":    load_rice_facebook,
 }
 
