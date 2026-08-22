@@ -266,14 +266,50 @@ def main():
 
         # ── CGS budget diagnostic (rice_fb only) ─────────────────────────────
         if net_name == "rice_fb":
+            C_d = _get_C()
             print("\n=== CGS BUDGET DIAGNOSTIC: rice_fb seed=0 ===")
             for kap_diag in ["unc", "k20"]:
                 B_diag = _get_B(kap_diag)
                 env_d = _ep_cgs(G, B_diag, 0, cal)
-                print(f"  {kap_diag:4s}: B0={B_diag:.4f}  B_final={env_d.B:.4f}"
-                      f"  |S_T|={len(env_d.S)}  rev≈{env_d.B - B_diag + 0.3*len(env_d.S):.2f}")
-            print("  If B_final >> B0: CGS profitable pricing (price>c) → budget grows, never bankrupt.")
-            print("  If B0 is 1e7 in both: budget was NOT applied.\n", flush=True)
+                n_off  = len(env_d.offered)
+                n_acc  = len(env_d.S)
+                n_skip = n_off - n_acc   # offered but not in S = rejected or skipped
+                bh     = env_d.budget_history
+                min_b  = min(bh) if bh else env_d.B
+                rev    = env_d.B - B_diag + C_d * n_acc
+                print(f"  {kap_diag:4s}: B0={B_diag:.4f}  B_final={env_d.B:.6f}  min_balance={min_b:.6f}")
+                print(f"         n_offers={n_off}  n_accepted={n_acc}  n_skips={n_skip}  rev≈{rev:.2f}")
+            print("  (n_skips = offered but NOT in S; if 0 in both → constraint never bound)", flush=True)
+
+            # ── CGS threshold sweep: where does constraint bind? ──────────────
+            print("\n=== CGS THRESHOLD SWEEP: rice_fb, kappa in {5,8,10,12,15,20} ===")
+            print(f"  {'kap':3s}  B0       reach_min  reach_maj  revenue  n_acc  n_skip  min_bal")
+            sweep_seeds = list(range(10))
+            for kap_int in [5, 8, 10, 12, 15, 20]:
+                B_sw = kap_int * C_d
+                reaches_min=[]; reaches_maj=[]; revs_sw=[]; n_accs=[]; n_sks=[]; min_bals=[]
+                for s_sw in sweep_seeds:
+                    e_sw = _ep_cgs(G, B_sw, s_sw, cal)
+                    n_off_sw = len(e_sw.offered)
+                    n_acc_sw = len(e_sw.S)
+                    rev_sw   = e_sw.B - B_sw + C_d * n_acc_sw
+                    bh_sw    = e_sw.budget_history
+                    mn_b_sw  = min(bh_sw) if bh_sw else e_sw.B
+                    g_labels = {v: G.nodes[v]['group'] for v in G.nodes()}
+                    gm_sw    = _group_metrics(e_sw, g_labels, [0, 1])
+                    reaches_min.append(gm_sw['0']['reach'])
+                    reaches_maj.append(gm_sw['1']['reach'])
+                    revs_sw.append(rev_sw)
+                    n_accs.append(n_acc_sw)
+                    n_sks.append(n_off_sw - n_acc_sw)
+                    min_bals.append(mn_b_sw)
+                print(f"  {kap_int:3d}  {B_sw:.4f}  "
+                      f"{np.mean(reaches_min):.3f}±{np.std(reaches_min):.3f}  "
+                      f"{np.mean(reaches_maj):.3f}±{np.std(reaches_maj):.3f}  "
+                      f"rev={np.mean(revs_sw):.2f}  "
+                      f"|S|={np.mean(n_accs):.1f}  "
+                      f"skip={np.mean(n_sks):.1f}  "
+                      f"min_b={np.min(min_bals):.4f}", flush=True)
 
         net_results = {}
         for kap_name in KAPPAS_NAMES:
