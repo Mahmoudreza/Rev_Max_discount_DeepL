@@ -264,6 +264,17 @@ def main():
         if args.sanity_only:
             continue
 
+        # ── CGS budget diagnostic (rice_fb only) ─────────────────────────────
+        if net_name == "rice_fb":
+            print("\n=== CGS BUDGET DIAGNOSTIC: rice_fb seed=0 ===")
+            for kap_diag in ["unc", "k20"]:
+                B_diag = _get_B(kap_diag)
+                env_d = _ep_cgs(G, B_diag, 0, cal)
+                print(f"  {kap_diag:4s}: B0={B_diag:.4f}  B_final={env_d.B:.4f}"
+                      f"  |S_T|={len(env_d.S)}  rev≈{env_d.B - B_diag + 0.3*len(env_d.S):.2f}")
+            print("  If B_final >> B0: CGS profitable pricing (price>c) → budget grows, never bankrupt.")
+            print("  If B0 is 1e7 in both: budget was NOT applied.\n", flush=True)
+
         net_results = {}
         for kap_name in KAPPAS_NAMES:
             B = _get_B(kap_name)
