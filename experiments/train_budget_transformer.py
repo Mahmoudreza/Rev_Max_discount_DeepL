@@ -193,9 +193,11 @@ def _build_traj_cache(graphs, seed: int) -> dict:
     if os.path.exists(cache_path):
         try:
             saved_key, tc = pickle.load(open(cache_path, "rb"))
-            if saved_key == key_str:
+            if saved_key == key_str and len(tc) > 0:
                 print(f"[traj] Cache HIT  ({len(tc)} trajectories)", flush=True)
                 return tc
+            elif len(tc) == 0:
+                print(f"[traj] Cache stale (0 trajectories) — rebuilding...", flush=True)
         except Exception:
             pass
 
