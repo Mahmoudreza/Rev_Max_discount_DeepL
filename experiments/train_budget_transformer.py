@@ -68,7 +68,8 @@ FF_P        = 0.37
 FF_PB       = 0.32
 TRAIN_SIZES = [200, 260, 320, 380, 440]
 W_HIGH      = 2.0
-N_MC        = 200
+N_MC        = 200   # Phase 2 rollouts (eval-quality)
+N_MC_P1     = 10    # Phase 1 trajectory replay (40× faster; acceptance noise OK)
 
 PH1_EPOCHS  = 300
 PH1_LR      = 1e-4
@@ -251,7 +252,8 @@ def phase1(pol, graphs, traj_cache: dict, device, seed: int, save_prefix: str):
                     if not traj:
                         continue
                     pol.reset_episode(device)
-                    cfg = BudgetEnvConfig(budget_B=B0, production_cost=C, seed=s)
+                    cfg = BudgetEnvConfig(budget_B=B0, production_cost=C, seed=s,
+                                          n_mc_samples=N_MC_P1)
                     env = BudgetRevenueEnv(G, cfg); env.reset()
                     step_losses = []
 
