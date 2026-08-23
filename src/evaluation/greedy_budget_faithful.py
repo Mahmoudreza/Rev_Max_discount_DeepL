@@ -24,13 +24,23 @@ import numpy as np
 import networkx as nx
 
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
-# Import the EXACT same influence + cache functions as unconstrained greedy_discount
-from src.evaluation.baselines import _compute_normalized_infl, _invalidate_caches
+# Import the EXACT same functions as unconstrained greedy_discount — no recomputation
+from src.evaluation.baselines import _compute_normalized_infl, _rayleigh_price
 
-C_DEFAULT   = 0.3
-B_RAYLEIGH  = 1.0
-TIER1_PRICE = math.sqrt(-2 * math.log(1 - 2.0/6.0)) * B_RAYLEIGH   # f(2/6) ≈ 0.534
-TIER2_PRICE = math.sqrt(-2 * math.log(1 - 4.0/6.0)) * B_RAYLEIGH   # f(4/6) ≈ 0.548
+C_DEFAULT  = 0.3
+B_RAYLEIGH = 1.0
+# _rayleigh_price(x, b) = (2x/b²) * exp(-(2x)²/(2b²))  [Rayleigh PDF at x]
+# verified: _rayleigh_price(2/6, 1) ≈ 0.534,  _rayleigh_price(4/6, 1) ≈ 0.548
+TIER1_PRICE = _rayleigh_price(2.0 / 6.0, B_RAYLEIGH)
+TIER2_PRICE = _rayleigh_price(4.0 / 6.0, B_RAYLEIGH)
+
+
+def _inv_budget(env, node):
+    """Invalidate neighbour caches — mirrors budget_baselines._inv exactly."""
+    for nb in env.graph.neighbors(node):
+        env._influence_cache.pop(nb, None)
+        env._true_val_cache.pop(nb, None)
+        env._est_val_cache.pop(nb, None)
 
 
 def _make_env(graph, B, c, seed=0, weight_high=2.0, n_mc=200):
@@ -96,11 +106,11 @@ def greedy_discount_budget_faithful(
             if price == 0.0:
                 env.S.add(target)
                 env.B -= c
-                _invalidate_caches(env, target)   # same as unconstrained
+                _inv_budget(env, target)
             elif true_val >= price:
                 env.S.add(target)
                 env.B = env.B - c + price
-                _invalidate_caches(env, target)
+                _inv_budget(env, target)
                 revenue += price
                 if price < c:
                     n_below += 1
