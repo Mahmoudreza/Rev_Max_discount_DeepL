@@ -157,3 +157,27 @@ def ie_strategy_budget(
         })
 
     return _aggregate(results)
+
+
+def ie_strategy_budget_aware(
+    graph: nx.Graph,
+    B: float,
+    c: float,
+    k_seeds_max: int = IE_K_SEEDS,
+    n_trials: int = 5,
+    weight_high: float = 2.0,
+) -> dict:
+    """IE-Strategy with budget-aware seed count.
+
+    k_seeds = min(k_seeds_max, floor(B / c))
+    so Phase-1 never attempts more seeds than the budget can fund.
+    Everything else identical to ie_strategy_budget.
+    """
+    import math
+    k = min(k_seeds_max, math.floor(B / c))
+    return ie_strategy_budget(
+        graph, B, c,
+        k_seeds=k,
+        n_trials=n_trials,
+        weight_high=weight_high,
+    )
