@@ -79,19 +79,22 @@ def greedy_discount_budget_faithful(
         lw = env._link_weights   # same as unconstrained greedy_discount
         revenue=0.0; n_below=0; n_skips=0
 
+        # Pre-compute estimate valuations; only invalidate neighbours on acceptance.
+        # This makes re-ranking O(n) with O(1) cache hits instead of O(n × MC).
+        ev_cache: dict = {v: env._estimate_valuation(v) for v in env.nodes}
+
         while True:
             remaining = [v for v in env.nodes if v not in env.offered]
             if not remaining:
                 break
 
-            # Dynamic re-rank: highest estimated valuation — identical to unconstrained
-            target = max(remaining, key=lambda v: env._estimate_valuation(v))
+            # Dynamic re-rank using cache — identical ordering to unconstrained
+            target = max(remaining, key=lambda v: ev_cache[v])
             # SAME influence function as unconstrained greedy_discount
             infl  = _compute_normalized_infl(graph, target, env.S, lw)
             price = _tier_price(infl)
 
             # Budget feasibility: SKIP-never-reprice
-            # B=0: free (price=0) fails (B-c<0); paid (price=0.534) passes (B-c+0.534>0)
             if env.B - c + price < -1e-9:
                 env.offered.add(target)
                 env.t += 1
@@ -107,10 +110,15 @@ def greedy_discount_budget_faithful(
                 env.S.add(target)
                 env.B -= c
                 _inv_budget(env, target)
+                # Refresh cache for invalidated neighbours
+                for nb in graph.neighbors(target):
+                    ev_cache[nb] = env._estimate_valuation(nb)
             elif true_val >= price:
                 env.S.add(target)
                 env.B = env.B - c + price
                 _inv_budget(env, target)
+                for nb in graph.neighbors(target):
+                    ev_cache[nb] = env._estimate_valuation(nb)
                 revenue += price
                 if price < c:
                     n_below += 1

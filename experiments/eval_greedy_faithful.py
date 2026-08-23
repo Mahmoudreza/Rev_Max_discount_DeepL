@@ -42,39 +42,55 @@ def _make_graphs():
 
 # ── Sanity check ──────────────────────────────────────────────────────────────
 def sanity_check():
+    import time
     from src.env.graph_generators import generate_forest_fire
     from src.evaluation.greedy_budget_faithful import greedy_discount_budget_faithful
-    from src.evaluation.budget_baselines import greedy_discount_budget
+    from src.utils.helpers import load_config_with_base
+    from omegaconf import OmegaConf
+    from src.evaluation.baselines import greedy_discount
 
-    G = generate_forest_fire(1000, 0.37, 0.32, seed=0)
-    B40 = 40 * C  # 12.0 — constraint should rarely bind
+    G_ff = generate_forest_fire(1000, 0.37, 0.32, seed=0)
+    B40  = 40 * C  # 12.0 — constraint should rarely bind
 
-    # Faithful budget (single seed)
-    r_faith = greedy_discount_budget_faithful(G, B40, C, n_trials=1, n_mc=N_MC)
+    # Time faithful on FF-1000
+    t0 = time.time()
+    r_faith = greedy_discount_budget_faithful(G_ff, B40, C, n_trials=1, n_mc=N_MC)
+    t_ff = time.time() - t0
     rev_f = r_faith["revenue"]["all"][0]
 
-    # Unconstrained greedy_discount
-    import omegaconf
-    # Load base config then override key fields
-    from src.utils.helpers import load_config_with_base
-    import os as _os
+    # Unconstrained greedy_discount on same seed
     cfg = load_config_with_base(
-        _os.path.join(_ROOT, "configs/experiments/rev_gnn_transformer_300ep.yaml"))
-    from omegaconf import OmegaConf
+        os.path.join(_ROOT, "configs/experiments/rev_gnn_transformer_300ep.yaml"))
     cfg = OmegaConf.merge(cfg, OmegaConf.create({
         "budget": {"k": 40},
         "influence": {"b": 1.0, "n_mc_samples": N_MC, "model": "monotone",
                       "weight_low": 0.0, "weight_high": W_HIGH},
         "env": {"production_cost": C},
+        "project": {"seed": 0},
     }))
-    from src.evaluation.baselines import greedy_discount
-    rev_u = greedy_discount(G, cfg)
+    t1 = time.time()
+    rev_u = greedy_discount(G_ff, cfg)
+    t_unc = time.time() - t1
 
     diff_pct = abs(rev_f - rev_u) / max(abs(rev_u), 1e-6) * 100
     print(f"\n=== SANITY CHECK FF-1000 kappa=40 seed=0 ===")
-    print(f"  Faithful budget  revenue = {rev_f:.3f}")
-    print(f"  Unconstrained    revenue = {rev_u:.3f}")
+    print(f"  Faithful budget  revenue = {rev_f:.3f}  ({t_ff:.1f}s)")
+    print(f"  Unconstrained    revenue = {rev_u:.3f}  ({t_unc:.1f}s)")
     print(f"  Diff = {diff_pct:.1f}%  {'PASS' if diff_pct <= 10.0 else 'FAIL — port not faithful, STOP'}")
+
+    # Time on polblogs too
+    try:
+        from src.env.graph_generators import load_polblogs
+        G_pb = load_polblogs()
+        t2 = time.time()
+        greedy_discount_budget_faithful(G_pb, B40, C, n_trials=1, n_mc=N_MC)
+        t_pb = time.time() - t2
+        print(f"  polblogs (n={G_pb.number_of_nodes()}) episode time = {t_pb:.1f}s")
+        if t_pb > 120:
+            print(f"  WARNING: polblogs > 2 min/episode — sweep will be slow")
+    except Exception as e:
+        print(f"  polblogs timing skipped: {e}")
+
     if diff_pct > 10.0:
         sys.exit(1)
     return True
