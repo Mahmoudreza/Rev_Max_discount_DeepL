@@ -24,24 +24,19 @@ import numpy as np
 import networkx as nx
 
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
+# Import the EXACT same influence + cache functions as unconstrained greedy_discount
+from src.evaluation.baselines import _compute_normalized_infl, _invalidate_caches
 
 C_DEFAULT   = 0.3
-B_RAYLEIGH  = 1.0         # b parameter for Rayleigh prices
-TIER1_PRICE = math.sqrt(-2 * math.log(1 - 2.0/6.0)) * B_RAYLEIGH   # f(2/6)
-TIER2_PRICE = math.sqrt(-2 * math.log(1 - 4.0/6.0)) * B_RAYLEIGH   # f(4/6)
+B_RAYLEIGH  = 1.0
+TIER1_PRICE = math.sqrt(-2 * math.log(1 - 2.0/6.0)) * B_RAYLEIGH   # f(2/6) ≈ 0.534
+TIER2_PRICE = math.sqrt(-2 * math.log(1 - 4.0/6.0)) * B_RAYLEIGH   # f(4/6) ≈ 0.548
 
 
 def _make_env(graph, B, c, seed=0, weight_high=2.0, n_mc=200):
     cfg = BudgetEnvConfig(budget_B=B, production_cost=c, seed=seed,
                           weight_high=weight_high, n_mc_samples=n_mc)
     return BudgetRevenueEnv(graph, cfg)
-
-
-def _inv(env, node):
-    for nb in env.graph.neighbors(node):
-        env._influence_cache.pop(nb, None)
-        env._true_val_cache.pop(nb, None)
-        env._est_val_cache.pop(nb, None)
 
 
 def _tier_price(infl: float) -> float:
@@ -71,6 +66,7 @@ def greedy_discount_budget_faithful(
         env = _make_env(graph, B, c, seed=trial,
                         weight_high=weight_high, n_mc=n_mc)
         env.reset()
+        lw = env._link_weights   # same as unconstrained greedy_discount
         revenue=0.0; n_below=0; n_skips=0
 
         while True:
@@ -80,19 +76,17 @@ def greedy_discount_budget_faithful(
             if env._check_bankrupt():
                 break
 
-            # Dynamic re-rank: highest estimated valuation (same as unconstrained)
+            # Dynamic re-rank: highest estimated valuation — identical to unconstrained
             target = max(remaining, key=lambda v: env._estimate_valuation(v))
-            infl   = env.get_current_influence(target)
-            price  = _tier_price(infl)
+            # SAME influence function as unconstrained greedy_discount
+            infl  = _compute_normalized_infl(graph, target, env.S, lw)
+            price = _tier_price(infl)
 
-            # Budget feasibility check: SKIP-never-reprice
+            # Budget feasibility: SKIP-never-reprice
             if env.B - c + price < -1e-9:
                 env.offered.add(target)
                 env.t += 1
                 n_skips += 1
-                # Stop if ALL remaining are unaffordable (all have price <= B - c < 0)
-                # Since paid offers (price > c) are always feasible when B > 0,
-                # only need to stop if B < 0.
                 if env._check_bankrupt():
                     break
                 continue
@@ -103,14 +97,13 @@ def greedy_discount_budget_faithful(
             env.t += 1
 
             if price == 0.0:
-                # Free seed: always accepted, no revenue, deduct cost
                 env.S.add(target)
                 env.B -= c
-                _inv(env, target)
+                _invalidate_caches(env, target)   # same as unconstrained
             elif true_val >= price:
                 env.S.add(target)
                 env.B = env.B - c + price
-                _inv(env, target)
+                _invalidate_caches(env, target)
                 revenue += price
                 if price < c:
                     n_below += 1
