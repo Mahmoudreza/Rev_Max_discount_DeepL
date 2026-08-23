@@ -55,13 +55,18 @@ def sanity_check():
 
     # Unconstrained greedy_discount
     import omegaconf
-    cfg_str = f"""
-budget: {{k: 40}}
-influence: {{b: 1.0, n_mc_samples: {N_MC}, model: monotone, weight_low: 0.0, weight_high: {W_HIGH}}}
-reward_type: flat
-env: {{production_cost: {C}}}
-"""
-    cfg = omegaconf.OmegaConf.create(cfg_str)
+    # Load base config then override key fields
+    from src.utils.helpers import load_config_with_base
+    import os as _os
+    cfg = load_config_with_base(
+        _os.path.join(_ROOT, "configs/experiments/rev_gnn_transformer_300ep.yaml"))
+    from omegaconf import OmegaConf
+    cfg = OmegaConf.merge(cfg, OmegaConf.create({
+        "budget": {"k": 40},
+        "influence": {"b": 1.0, "n_mc_samples": N_MC, "model": "monotone",
+                      "weight_low": 0.0, "weight_high": W_HIGH},
+        "env": {"production_cost": C},
+    }))
     from src.evaluation.baselines import greedy_discount
     rev_u = greedy_discount(G, cfg)
 
