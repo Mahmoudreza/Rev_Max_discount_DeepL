@@ -73,8 +73,6 @@ def greedy_discount_budget_faithful(
             remaining = [v for v in env.nodes if v not in env.offered]
             if not remaining:
                 break
-            if env._check_bankrupt():
-                break
 
             # Dynamic re-rank: highest estimated valuation — identical to unconstrained
             target = max(remaining, key=lambda v: env._estimate_valuation(v))
@@ -83,12 +81,11 @@ def greedy_discount_budget_faithful(
             price = _tier_price(infl)
 
             # Budget feasibility: SKIP-never-reprice
+            # B=0: free (price=0) fails (B-c<0); paid (price=0.534) passes (B-c+0.534>0)
             if env.B - c + price < -1e-9:
                 env.offered.add(target)
                 env.t += 1
                 n_skips += 1
-                if env._check_bankrupt():
-                    break
                 continue
 
             # Offer and evaluate
