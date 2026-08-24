@@ -253,8 +253,8 @@ def main():
     print(hdr); print("-"*len(hdr))
 
     for k in KAPPAS:
-        pm, ps, bc, st, rm, rs, profs_t = _sweep(pol_t, G, cache, ei_t, k,
-                                                   device, _features21)
+        pm, ps, bc, s_t, rm, rs, profs_t = _sweep(pol_t, G, cache, ei_t, k,
+                                                    device, _features21)
         # Ordering ablation
         pm_deg, ps_deg, _, _, _, _, profs_deg = _sweep(pol_t, G, cache, ei_t, k,
                                                         device, _features21,
@@ -279,15 +279,15 @@ def main():
                                 scale=st.sem(np.array(profs_t) - np.array(lstm_profs)))
             not_sig = pval > 0.05
 
-        print(f"  {k:2d}  {pm:8.2f}±{ps:5.2f}  {bc:5.1f}  {st:5.1f}  ?  {rm:8.2f}  |  "
+        print(f"  {k:2d}  {pm:8.2f}±{ps:5.2f}  {bc:5.1f}  {s_t:5.1f}  ?  {rm:8.2f}  |  "
               f"{lstm_pm:8.2f}  {ie_pm:8.2f}  {gf_pm:8.2f}  {cgs_pm:8.2f}  "
               f"{diff:+7.2f}  {pval:6.4f}  {'NS' if not_sig else 'SIG'}", flush=True)
         print(f"     ablation(deg-order): {pm_deg:8.2f}±{ps_deg:5.2f}  diff={pm-pm_deg:+.2f}  "
               f"CI95=[{(pm-pm_deg):.2f}±?]", flush=True)
 
         all_res[f"k{k}"] = {
-            "transformer": {"profit": [pm, ps], "rev": [rm, rs], "bc": bc, "st": st,
-                            "sha": sha_t, "all": profs_t},
+            "transformer": {"profit": [pm, ps], "rev": [rm, rs], "bc": bc,
+                            "s_t": s_t, "sha": sha_t, "all": profs_t},
             "transformer_deg": {"profit": [pm_deg, ps_deg], "all": profs_deg},
             "lstm": {"profit": lstm_pm, "all": lstm_profs},
             "ie_aware": bl["IE_aware"],
