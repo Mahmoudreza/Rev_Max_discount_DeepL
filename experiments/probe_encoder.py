@@ -186,9 +186,14 @@ def main():
 
     results = {}
     for enc_name, (ckpt_path, in_dim) in checkpoints.items():
+        if not os.path.exists(ckpt_path):
+            print(f"\n=== {enc_name}  SKIP: not found: {ckpt_path} ==="); continue
         sha = _sha8(ckpt_path)
         print(f"\n=== {enc_name}  sha={sha}  in_dim={in_dim} ===")
-        pol, H = _load_policy(ckpt_path, in_dim, device)
+        try:
+            pol, H = _load_policy(ckpt_path, in_dim, device)
+        except Exception as e:
+            print(f"  SKIP: load failed: {e}"); continue
         for gname, G in graphs.items():
             cache = build_graph_feature_cache(G, compute_static_features(G))
             ei_t  = _ei(G, device)
