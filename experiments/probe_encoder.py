@@ -27,7 +27,7 @@ from sklearn.model_selection import train_test_split
 _ROOT = str(Path(__file__).parent.parent)
 LSTM_CKPT = os.path.join(_ROOT, "results/checkpoints/rev_gnn_lstm_unified.pt")
 LSTM_SHA  = "0b549f93"
-C = 0.3; W_HIGH = 2.0; N_MC = 50  # 50 for speed, not paper quality
+C = 0.3; W_HIGH = 2.0; N_MC = 50  # 50 vs paper's 200 — noisier y, R^2 uniformly depressed
 
 
 def _sha8(path): return hashlib.sha256(open(path,"rb").read()).hexdigest()[:8]
@@ -54,18 +54,37 @@ def _load_policy(ckpt_path, in_dim, device):
     NL = int(cfg.encoder.n_layers)
     DO = float(cfg.encoder.dropout)
     enc = GraphSAGEEncoder(in_dim, H, NL, DO)
-    try:
+
+    # Choose sequence encoder based on what the checkpoint contains.
+    # We must build the RIGHT architecture before loading to use strict=True.
+    sd_raw = torch.load(ckpt_path, map_location=device, weights_only=True)
+    if isinstance(sd_raw, dict) and "policy_state_dict" in sd_raw:
+        sd_raw = sd_raw["policy_state_dict"]
+    if isinstance(sd_raw, dict) and "state_dict" in sd_raw:
+        sd_raw = sd_raw["state_dict"]
+    has_transformer = any("transformer" in k for k in sd_raw)
+
+    if has_transformer:
         tfm = EpisodeTransformerSliding.from_config(cfg.transformer)
         pol = TransformerJointPolicy(enc, tfm, gnn_dim=H,
                                      context_dim=tfm.context_dim).to(device)
-    except Exception:
+    else:
         lstm = EpisodeLSTM.from_config(cfg.lstm)
         pol = JointPolicy(enc, lstm, gnn_dim=H,
                           context_dim=lstm.context_dim).to(device)
-    sd = torch.load(ckpt_path, map_location=device, weights_only=True)
-    if isinstance(sd, dict) and "policy_state_dict" in sd: sd = sd["policy_state_dict"]
-    if isinstance(sd, dict) and "state_dict" in sd: sd = sd["state_dict"]
-    pol.load_state_dict(sd, strict=False); pol.eval()
+
+    model_keys = set(pol.state_dict().keys())
+    ckpt_keys  = set(sd_raw.keys())
+    missing = model_keys - ckpt_keys
+    unexpect = ckpt_keys - model_keys
+    if missing:
+        raise RuntimeError(f"strict=True ABORT: {len(missing)} keys missing "
+                           f"from checkpoint, e.g. {sorted(missing)[:3]}")
+    if unexpect:
+        print(f"  WARN: {len(unexpect)} unexpected keys in ckpt (will be ignored by strict=True)")
+    pol.load_state_dict(sd_raw, strict=True)
+    pol.eval()
+    print(f"  loaded {len(ckpt_keys)} keys strict=True  seq={'transformer' if has_transformer else 'lstm'}")
     return pol, H
 
 
@@ -107,7 +126,9 @@ def _collect(pol, G, cache, ei_t, n_episodes=20, sample_every=50, device="cpu"):
                         torch.ones(n, dtype=torch.bool, device=device))
                 h_np = h_all.cpu().numpy()  # (n, H)
 
-                for idx in avail[:50]:  # cap 50 nodes/snapshot to keep it fast
+                sample = (avail if len(avail) <= 50
+                          else list(np.random.choice(avail, 50, replace=False)))
+                for idx in sample:  # random 50, not first-by-index
                     try:
                         y = env._estimate_valuation(nodes[idx])
                     except Exception:
@@ -174,13 +195,14 @@ def main():
             print(f"  Collecting from {gname} n={G.number_of_nodes()} …", flush=True)
             H_vecs, raw_vecs, y_vals, deg_vecs = _collect(
                 pol, G, cache, ei_t, n_episodes=25, sample_every=50, device=device)
-            print(f"  Collected {len(y_vals)} pairs  y range=[{y_vals.min():.3f},{y_vals.max():.3f}]")
+            print(f"  Collected {len(y_vals)} pairs  y=[{y_vals.min():.3f},{y_vals.max():.3f}]"
+                  f"  NOTE: off-policy steps (avail[0]+disc=0.5); N_MC=50 not 200")
             print(f"  Probes:")
             r2_enc = _probe(H_vecs,   y_vals, f"encoder_h ({H}-dim)")
             r2_raw = _probe(raw_vecs, y_vals, f"raw_feats (21-dim)")
             r2_2   = _probe(deg_vecs, y_vals, f"degree+bucket (2-dim)")
             results[(enc_name, gname)] = {"enc": r2_enc, "raw": r2_raw, "2d": r2_2,
-                                           "n": len(y_vals)}
+                                          "n": len(y_vals)}
 
     print("\n=== SUMMARY ===")
     print(f"{'Encoder':20s}  {'Graph':10s}  {'h-R^2':>7s}  {'raw-R^2':>7s}  {'2d-R^2':>7s}  interpretation")
