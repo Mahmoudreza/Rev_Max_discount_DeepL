@@ -290,12 +290,17 @@ def phase1(pol, graphs, traj_cache: dict, device, seed: int, save_prefix: str):
                         epoch_loss  += traj_loss.item()
                         epoch_steps += 1
 
+        # Save every epoch; README + print every 20th; rolling delete beyond last 20
+        avg = epoch_loss / max(epoch_steps, 1)
+        sp = save_prefix.replace("_ep.pt", f"_p1_ep{ep:04d}.pt")
+        torch.save(pol.state_dict(), sp)
         if ep % 20 == 0:
-            avg = epoch_loss / max(epoch_steps, 1)
-            sp = save_prefix.replace("_ep.pt", f"_p1_ep{ep}.pt")
-            torch.save(pol.state_dict(), sp); _append_readme(sp)
-            print(f"[P1-s{seed}] ep={ep}/{PH1_EPOCHS}  "
-                  f"avg_loss={avg:.4f}  steps={epoch_steps}  saved {os.path.basename(sp)}", flush=True)
+            _append_readme(sp)
+        print(f"[P1-s{seed}] ep={ep}/{PH1_EPOCHS}  avg_loss={avg:.4f}  steps={epoch_steps}  saved {os.path.basename(sp)}", flush=True)
+        old_ep = ep - 21
+        old_sp = save_prefix.replace("_ep.pt", f"_p1_ep{old_ep:04d}.pt")
+        if old_ep > 0 and old_ep % 20 != 0 and os.path.exists(old_sp):
+            os.remove(old_sp)
 
     return pol
 
@@ -399,13 +404,19 @@ def phase2(pol, graphs, device, seed: int, save_prefix: str):
                 best_sd  = {k: v.clone() for k, v in pol.state_dict().items()}
                 best_ep  = ep
 
+        # Save every epoch; README + print every 20th; rolling delete beyond last 20
+        sp = save_prefix.replace("_ep.pt", f"_p2_ep{ep:04d}.pt")
+        torch.save(pol.state_dict(), sp)
         if ep % 20 == 0:
             bra = [f"{np.mean(r):.1f}" if r else "—" for r in bucket_revs]
             print(f"[P2-s{seed}] ep={ep}/{PH2_EPOCHS}  "
                   f"min_adv={bucket_nadv and min(bucket_nadv) or 0:.3f}  "
                   f"bucket_rev={bra}", flush=True)
-            sp = save_prefix.replace("_ep.pt", f"_ep{ep}.pt")
-            torch.save(pol.state_dict(), sp); _append_readme(sp)
+            _append_readme(sp)
+        old_ep = ep - 21
+        old_sp = save_prefix.replace("_ep.pt", f"_p2_ep{old_ep:04d}.pt")
+        if old_ep > 0 and old_ep % 20 != 0 and os.path.exists(old_sp):
+            os.remove(old_sp)
 
     if best_sd:
         pol.load_state_dict(best_sd)
