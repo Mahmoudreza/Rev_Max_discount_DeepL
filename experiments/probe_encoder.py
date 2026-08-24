@@ -44,10 +44,6 @@ def _ei(G, device):
 def _load_policy(ckpt_path, in_dim, device):
     from src.utils.helpers import load_config_with_base
     from src.models.encoders.graphsage import GraphSAGEEncoder
-    from src.models.encoders.episode_lstm import EpisodeLSTM
-    from src.models.encoders.episode_transformer import EpisodeTransformerSliding
-    from src.models.policies.joint_policy import JointPolicy
-    from src.models.policies.transformer_joint_policy import TransformerJointPolicy
     cfg = load_config_with_base(
         os.path.join(_ROOT, "configs/experiments/rev_gnn_transformer_300ep.yaml"))
     H  = int(cfg.encoder.hidden_dim)
@@ -56,7 +52,7 @@ def _load_policy(ckpt_path, in_dim, device):
     enc = GraphSAGEEncoder(in_dim, H, NL, DO)
 
     # Choose sequence encoder based on what the checkpoint contains.
-    # We must build the RIGHT architecture before loading to use strict=True.
+    # Defer imports so a missing episode_lstm doesn't block transformer-only runs.
     sd_raw = torch.load(ckpt_path, map_location=device, weights_only=True)
     if isinstance(sd_raw, dict) and "policy_state_dict" in sd_raw:
         sd_raw = sd_raw["policy_state_dict"]
@@ -65,10 +61,14 @@ def _load_policy(ckpt_path, in_dim, device):
     has_transformer = any("transformer" in k for k in sd_raw)
 
     if has_transformer:
+        from src.models.encoders.episode_transformer import EpisodeTransformerSliding
+        from src.models.policies.transformer_joint_policy import TransformerJointPolicy
         tfm = EpisodeTransformerSliding.from_config(cfg.transformer)
         pol = TransformerJointPolicy(enc, tfm, gnn_dim=H,
                                      context_dim=tfm.context_dim).to(device)
     else:
+        from src.models.encoders.episode_lstm import EpisodeLSTM
+        from src.models.policies.joint_policy import JointPolicy
         lstm = EpisodeLSTM.from_config(cfg.lstm)
         pol = JointPolicy(enc, lstm, gnn_dim=H,
                           context_dim=lstm.context_dim).to(device)
