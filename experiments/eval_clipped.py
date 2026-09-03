@@ -147,7 +147,7 @@ def _rollout(pol, G, cache, ei_t, B0, k, seed, device, feat_fn, do_clip):
 
         # Raw discount from policy
         d_raw = float(pol.get_discount_distribution(
-            torch.cat([h[ni], ctx])).mean.clamp(1e-4, 1-1e-4))
+            torch.cat([h[ni], ctx])).mean.clamp(1e-4, 1-1e-4).detach())
 
         # Apply clipping if requested
         if do_clip:
