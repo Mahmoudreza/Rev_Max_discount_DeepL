@@ -115,7 +115,8 @@ def _stats(vals):
 
 
 def _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k):
-    """Plan + execute Cal-DP v2 and v3 for one k. Returns (v2_revs, v3_revs)."""
+    """Plan + execute Cal-DP v2 and v3 for one k.
+    Returns (cdp_revs, cdp_ns, cdp_profs, cdp_fbs) — composite = max(v2, v3)."""
     n = graph.number_of_nodes()
     ordering = sorted(graph.nodes(), key=lambda v: graph.degree(v), reverse=True)
     all_deg  = np.array([graph.degree(v) for v in ordering], dtype=float)
@@ -127,23 +128,31 @@ def _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k):
     dp3, tier3 = _plan_dp_v3(n_total=n, V3=V3, A3=A3, T=T3, class_of_pos=cpos,
                               B=B, c=C, sb_size=sb3, n_s_buckets=_N_S_BUCKETS,
                               tiers=TIERS, delta=DELTA)
-    v2_revs, v3_revs = [], []
+    cdp_revs, cdp_ns, cdp_profs, cdp_fbs = [], [], [], []
     for seed in range(N_TRIALS):
         env2 = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
         env2.reset()
-        rev2, _, _ = _execute_v2(env=env2, ordering=ordering, plan=plan2,
-                                  V=V2, A=A2, class_boundaries=cb2, infl_boundaries=ib2,
-                                  c=C, class_of_pos=cpos,
-                                  dp_table=[[0.0]*(n+1) for _ in range(b_steps+1)],
-                                  b_steps=b_steps, delta=DELTA, tiers=TIERS)
+        rev2, ns2, _ = _execute_v2(env=env2, ordering=ordering, plan=plan2,
+                                    V=V2, A=A2, class_boundaries=cb2, infl_boundaries=ib2,
+                                    c=C, class_of_pos=cpos,
+                                    dp_table=[[0.0]*(n+1) for _ in range(b_steps+1)],
+                                    b_steps=b_steps, delta=DELTA, tiers=TIERS)
         env3 = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
         env3.reset()
-        rev3, _, _, _ = _execute_v3(env=env3, ordering=ordering, dp3=dp3, tier3=tier3,
-                                     V3=V3, A3=A3, class_boundaries=cb3, sb_size=sb3,
-                                     c=C, class_of_pos=cpos, n_s_buckets=_N_S_BUCKETS,
-                                     b_steps=b_steps, delta=DELTA, tiers=TIERS, log_steps=0)
-        v2_revs.append(float(rev2)); v3_revs.append(float(rev3))
-    return v2_revs, v3_revs
+        rev3, ns3, _, _ = _execute_v3(env=env3, ordering=ordering, dp3=dp3, tier3=tier3,
+                                       V3=V3, A3=A3, class_boundaries=cb3, sb_size=sb3,
+                                       c=C, class_of_pos=cpos, n_s_buckets=_N_S_BUCKETS,
+                                       b_steps=b_steps, delta=DELTA, tiers=TIERS, log_steps=0)
+        # Composite: pick the arm that achieved higher revenue
+        if rev2 >= rev3:
+            rev_c, ns_c = float(rev2), int(ns2)
+        else:
+            rev_c, ns_c = float(rev3), int(ns3)
+        profit_c = rev_c - C * ns_c
+        fb_c     = B + profit_c          # B_T = B_0 + profit
+        cdp_revs.append(rev_c); cdp_ns.append(ns_c)
+        cdp_profs.append(profit_c); cdp_fbs.append(fb_c)
+    return cdp_revs, cdp_ns, cdp_profs, cdp_fbs
 
 
 def run_network(net: str, out_path: str, device):
@@ -202,8 +211,8 @@ def run_network(net: str, out_path: str, device):
 
         # ── Cal-DP: plan+execute only (calibration already done above) ────────
         t_cdp = time.time()
-        v2_raw, v3_raw = _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k)
-        cdp_raw = [max(a, b) for a, b in zip(v2_raw, v3_raw)]
+        cdp_raw, cdp_ns, cdp_profs, cdp_fbs = _caldp_execute(
+            graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k)
         t_cdp_done = time.time()-t_cdp
 
         # ── CGS (arm3, lambda=1.0) ────────────────────────────────────────────
@@ -237,15 +246,26 @@ def run_network(net: str, out_path: str, device):
         ab_revs, ab_s_ts, ab_bcs, ab_profs = eval_arm_b_k_full(
             arm_b, graph, cache, ei, B, N_TRIALS, device)
 
+        # final_budget B_T = B_0 + profit for IE / GD (computed from profit arrays)
+        ie_fb  = [B + p for p in ie_prof]
+        gd_fb  = [B + p for p in gd_prof]
+        cgs_fb = [B + p for p in cgs_profs]
+        ab_fb  = [B + p for p in ab_profs]
+
         elapsed = time.time() - t0
         results[k] = {
-            "IE+Budget":     {**_stats(ie_raw),  "profit": _stats(ie_prof),  "n_in_S": _stats(ie_s_t)},
-            "Greedy+Budget": {**_stats(gd_raw),  "profit": _stats(gd_prof),  "n_in_S": _stats(gd_s_t)},
-            "Cal-DP":        _stats(cdp_raw),
+            "IE+Budget":     {**_stats(ie_raw),  "profit": _stats(ie_prof),
+                              "n_in_S": _stats(ie_s_t), "final_budget": _stats(ie_fb)},
+            "Greedy+Budget": {**_stats(gd_raw),  "profit": _stats(gd_prof),
+                              "n_in_S": _stats(gd_s_t), "final_budget": _stats(gd_fb)},
+            "Cal-DP":        {**_stats(cdp_raw), "profit": _stats(cdp_profs),
+                              "n_in_S": _stats(cdp_ns),  "final_budget": _stats(cdp_fbs)},
             "CGS":           {**_stats(cgs_revs), "profit": _stats(cgs_profs),
-                              "n_in_S": _stats(cgs_s_ts), "n_below": _stats(cgs_bcs)},
+                              "n_in_S": _stats(cgs_s_ts), "n_below": _stats(cgs_bcs),
+                              "final_budget": _stats(cgs_fb)},
             "Rev-GNN-LSTM":  {**_stats(ab_revs), "profit": _stats(ab_profs),
-                              "n_in_S": _stats(ab_s_ts), "n_below": _stats(ab_bcs)},
+                              "n_in_S": _stats(ab_s_ts), "n_below": _stats(ab_bcs),
+                              "final_budget": _stats(ab_fb)},
         }
         print(f"  k={k:2d}  IE={_stats(ie_raw)['mean']:.1f}"
               f"  GD={_stats(gd_raw)['mean']:.1f}"
