@@ -25,7 +25,8 @@ from src.utils.features import (compute_node_features_fast, compute_static_featu
 from src.utils.helpers import graph_to_pyg_data, set_seed
 from src.evaluation.budget_baselines import greedy_discount_budget, _make_env
 from src.evaluation.ie_budget import ie_strategy_budget, _greedy_seed_selection_celf, IE_K_SEEDS
-from _cal_episode_utils import calibrate, _sel_episode
+from _cal_episode_utils import _sel_episode
+from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table as _cal_v2
 from _arm_b_utils import make_ei, N_MC, W_HIGH, C, ARM_B_SHA
 from _arm_b_utils import _feat_unconstrained, _avail_mask, load_arm_b
 
@@ -125,8 +126,9 @@ def run_net(net, pol_c, pol_b, device, out_dir, diag_net="polblogs", diag_k=15):
     cfg = BudgetEnvConfig(production_cost=C, weight_high=W_HIGH, n_mc_samples=N_MC)
     print(f"\n=== {net} ===", flush=True)
 
-    # Calibrate once
-    V, A, P, cb, ib = calibrate(graph, cfg)
+    # Calibrate once — use n_sims=5 to reuse cache from budget_sweep_10seed.py
+    V, A, P, cb, ib = _cal_v2(graph, cfg, n_sims=5, seed=0)
+    print(f"  calibrate done", flush=True)
 
     # IE seed orderings once
     ie_ord = {}
