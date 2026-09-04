@@ -234,16 +234,15 @@ def run_network(net: str, out_path: str, device):
                       flush=True)
             try:
                 rev, n_sk = arm3_episode(env, graph, A, V, cb, ib, CGS_LAM)
-                # n_sk may be int or dict (future-proof)
-                if isinstance(n_sk, dict):
-                    n_s = n_sk.get("n_in_S", 0); bc = n_sk.get("n_below_cost", 0)
-                else:
-                    n_s = int(n_sk); bc = 0
-                profit_v = float(rev) - C * n_s
-                # Budget identity guard: profit = B_T - B_0
-                assert abs(profit_v - (env.B - B)) < 1e-6, (
+                # n_sk is k_seeds (influence seed COUNT = 30), NOT total |S_T|.
+                # Use env.S for true |S_T| and env.B for true B_T.
+                n_s  = len(env.S)       # total |S_T| = seeds + phase2 accepted
+                profit_v = env.B - B    # B_T - B_0 (exact, no rounding)
+                bc = 0
+                # Budget identity guard: revenue accounting must close
+                assert abs((float(rev) - C * n_s) - profit_v) < 1e-6, (
                     f"CGS profit identity FAIL seed={seed}: "
-                    f"profit={profit_v:.8f}  B_T-B_0={env.B - B:.8f}")
+                    f"rev-c*|S|={float(rev)-C*n_s:.8f}  B_T-B_0={profit_v:.8f}")
                 cgs_revs.append(float(rev)); cgs_s_ts.append(n_s); cgs_bcs.append(bc)
                 cgs_profs.append(profit_v)
             except Exception as e:
