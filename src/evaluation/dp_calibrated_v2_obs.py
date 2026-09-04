@@ -34,7 +34,7 @@ def calibrate_v2_obs_table(
     gh = _graph_hash(graph)
     cache = os.path.join(
         _CACHE_DIR,
-        f"dp_calibration_v2_obs_{gh}_nc{n_classes}_nb{n_buckets}_{n_sims}.npz",
+        f"dp_calibration_v2_obs_{gh}_nc{n_classes}_nb{n_buckets}_{n_sims}_wh{cfg.weight_high:.1f}.npz",
     )
     if os.path.exists(cache):
         dat = np.load(cache, allow_pickle=True)

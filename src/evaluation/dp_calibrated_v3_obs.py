@@ -59,7 +59,7 @@ def calibrate_v3_obs_table(
     # Cache key "_5pass": 5 dedicated tier passes × n_sims (150k total offers)
     cache = os.path.join(
         _CACHE_DIR,
-        f"dp_calibration_v3_obs5_{gh}_nc{n_classes}_ns{n_s_buckets}_{n_sims}.npz",
+        f"dp_calibration_v3_obs5_{gh}_nc{n_classes}_ns{n_s_buckets}_{n_sims}_wh{cfg.weight_high:.1f}.npz",
     )
     if os.path.exists(cache):
         dat = np.load(cache, allow_pickle=True)
