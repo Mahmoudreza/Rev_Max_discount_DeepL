@@ -2,7 +2,7 @@
 armC_w2_sweep.py — Arm C (profit objective) vs Rev-GNN-LSTM, IE, Greedy, CGS
 at W_HIGH=2.0, BudgetRevenueEnv, all 5 networks x 6 kappas x 10 seeds.
 
-Arm C checkpoint: c1_ffba_2to1_final.pt (profit objective, trained at W_HIGH=1.0)
+Arm C checkpoint: rev_gnn_lstm_tc.pt (sha=20901c29, profit objective Pi=R-c|S|, trained W_HIGH=1.0)
 Rev-GNN-LSTM:    rev_gnn_lstm_densemix.pt (sha=0b549f93, revenue objective)
 """
 import sys, os, json, hashlib, argparse, time
@@ -34,7 +34,7 @@ assert W_HIGH == 2.0
 
 # ── Arm C checkpoint ─────────────────────────────────────────────────────────
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ARM_C_CKPT = os.path.join(_ROOT, "results/checkpoints/c1_ffba_2to1_final.pt")
+ARM_C_CKPT = os.path.join(_ROOT, "results/checkpoints/rev_gnn_lstm_tc.pt")
 ARM_C_SHA  = None  # computed at load time
 
 
