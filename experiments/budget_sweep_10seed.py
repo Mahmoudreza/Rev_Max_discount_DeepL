@@ -142,17 +142,20 @@ def run_network(net: str, out_path: str, device):
         gd_s_t   = _raw_key(r_gd, "n_in_S", N_TRIALS)
 
         # ── CGS (arm3, lambda=1.0) ────────────────────────────────────────────
+        # arm3_episode returns (revenue, n_sk) where n_sk is int (|S_T|)
         cgs_revs, cgs_profs, cgs_s_ts, cgs_bcs = [], [], [], []
         for seed in SEEDS:
             env = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
+            env.reset()
             try:
-                rev, info = arm3_episode(env, graph, A, V, cb, ib, CGS_LAM)
-                n_s  = info.get("n_in_S", len(env.S) if hasattr(env,"S") else 0)
-                bc   = info.get("n_below_cost", 0)
-                cgs_revs.append(float(rev))
-                cgs_s_ts.append(int(n_s))
-                cgs_bcs.append(int(bc))
-                cgs_profs.append(float(rev) - C * int(n_s))
+                rev, n_sk = arm3_episode(env, graph, A, V, cb, ib, CGS_LAM)
+                # n_sk may be int or dict (future-proof)
+                if isinstance(n_sk, dict):
+                    n_s = n_sk.get("n_in_S", 0); bc = n_sk.get("n_below_cost", 0)
+                else:
+                    n_s = int(n_sk); bc = 0
+                cgs_revs.append(float(rev)); cgs_s_ts.append(n_s); cgs_bcs.append(bc)
+                cgs_profs.append(float(rev) - C * n_s)
             except Exception as e:
                 print(f"  CGS err seed={seed}: {e}")
                 cgs_revs.append(float("nan")); cgs_profs.append(float("nan"))
