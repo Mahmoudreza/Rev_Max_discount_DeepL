@@ -228,12 +228,27 @@ def run_network(net: str, out_path: str, device):
             # DIAGNOSTIC: print realized edge weights for seed=0, first k only
             if seed == 0 and k == K_VALUES[0]:
                 _w = np.array(list(env._link_weights.values()))
+                import time as _t; _nodes = list(graph.nodes())[:200]
+                _t0 = _t.time()
+                for _nd in _nodes: env.get_current_influence(_nd)
+                _first = _t.time() - _t0
+                _t0 = _t.time()
+                for _nd in _nodes: env.get_current_influence(_nd)
+                _second = _t.time() - _t0
+                _ratio = _first / max(_second, 1e-9)
+                _cache_ok = "CACHE_OK" if _ratio > 5 else "CACHE_MISS"
                 print(f"  [DIAG net={net} k={k} seed=0] "
                       f"cfg.W_HIGH={cfg.weight_high:.1f}  "
-                      f"link_mean={_w.mean():.4f}  link_max={_w.max():.4f}",
+                      f"link_mean={_w.mean():.4f}  link_max={_w.max():.4f}  "
+                      f"influence_cache: {_cache_ok} "
+                      f"1st={_first:.4f}s 2nd={_second:.4f}s ratio={_ratio:.0f}x",
                       flush=True)
             try:
+                _t_a3 = time.time()
                 rev, n_sk = arm3_episode(env, graph, A, V, cb, ib, CGS_LAM)
+                if seed == 0 and k == K_VALUES[0]:
+                    print(f"  [DIAG] arm3 seed=0 done in {time.time()-_t_a3:.2f}s "
+                          f"rev={float(rev):.2f} |S|={len(env.S)} B_T={env.B:.3f}", flush=True)
                 # n_sk is k_seeds (influence seed COUNT = 30), NOT total |S_T|.
                 # Use env.S for true |S_T| and env.B for true B_T.
                 n_s  = len(env.S)       # total |S_T| = seeds + phase2 accepted
