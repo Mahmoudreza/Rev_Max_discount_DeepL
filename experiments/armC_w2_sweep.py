@@ -41,8 +41,9 @@ def _sha8(p):
     return hashlib.sha256(open(p, "rb").read()).hexdigest()[:8]
 
 
-def load_policy(ckpt_path, device):
-    enc  = GraphSAGEEncoder(in_dim=21, hidden_dim=64, n_layers=2)
+def load_policy(ckpt_path, device, in_dim=20):
+    """Load a SequentialJointPolicy; in_dim=20 for Arm C (no budget dummy)."""
+    enc  = GraphSAGEEncoder(in_dim=in_dim, hidden_dim=64, n_layers=2)
     lstm = EpisodeLSTM(graph_dim=64, lstm_hidden=64, n_layers=1)
     pol  = SequentialJointPolicy(enc, lstm, gnn_dim=64, context_dim=64)
     sd = torch.load(ckpt_path, map_location="cpu")
@@ -50,6 +51,12 @@ def load_policy(ckpt_path, device):
     elif "model_state_dict" in sd: sd = sd["model_state_dict"]
     pol.load_state_dict(sd, strict=True)
     return pol.eval().to(device)
+
+
+def _feat_arm_c(cache, env, n):
+    """20-dim features for Arm C (no budget dummy column)."""
+    from src.utils.features import compute_node_features_fast
+    return compute_node_features_fast(cache, env.S, env.offered, env.t, k=50, env=env)
 
 
 K_VALUES = [5, 10, 15, 20, 30, 40]
@@ -75,8 +82,10 @@ def _stats(vals):
 
 
 @torch.no_grad()
-def _run_policy_episode(pol, graph, cache, ei, B, seed, device, trace_first30=False):
-    """Returns (revenue, |S_T|, n_below_c, profit, below_prices, above_prices, step_trace)."""
+def _run_policy_episode(pol, graph, cache, ei, B, seed, device, trace_first30=False, feat_fn=None):
+    """Returns (revenue, |S_T|, n_below_c, profit, below_prices, above_prices, step_trace).
+    feat_fn: callable(cache, env, n) -> np.array.  Default: _feat_unconstrained (21-dim)."""
+    if feat_fn is None: feat_fn = _feat_unconstrained
     n = graph.number_of_nodes()
     set_seed(seed)
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed,
@@ -85,7 +94,7 @@ def _run_policy_episode(pol, graph, cache, ei, B, seed, device, trace_first30=Fa
     pol.reset_episode(device)
     below_p, above_p, trace = [], [], []
     while env.available_nodes and not env._check_bankrupt():
-        x  = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+        x  = torch.FloatTensor(feat_fn(cache, env, n)).to(device)
         av = _avail_mask(env, n, device)
         if not av.any(): break
         sc, h, ctx, _ = pol.forward(x, ei, av)
@@ -132,13 +141,14 @@ def run_net(net, pol_c, pol_b, device, out_dir, diag_net="polblogs", diag_k=15):
         B = k * C
         t0 = time.time()
 
-        # arm_c
+        # arm_c (20-dim features, no budget dummy)
         ac_rev, ac_ns, ac_bc, ac_prof = [], [], [], []
         ac_bl_p, ac_ab_p = [], []
         for seed in SEEDS:
             rv, ns, bc, pf, bl, ab, tr = _run_policy_episode(
                 pol_c, graph, cache, ei, B, seed, device,
-                trace_first30=(net==diag_net and k==diag_k and seed==0))
+                trace_first30=(net==diag_net and k==diag_k and seed==0),
+                feat_fn=_feat_arm_c)
             ac_rev.append(rv); ac_ns.append(ns); ac_bc.append(bc); ac_prof.append(pf)
             ac_bl_p.extend(bl); ac_ab_p.extend(ab)
             if net==diag_net and k==diag_k and seed==0:
