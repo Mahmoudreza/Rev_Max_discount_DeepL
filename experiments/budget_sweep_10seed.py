@@ -33,7 +33,7 @@ from src.env.graph_generators import (
 )
 from src.evaluation.budget_baselines import greedy_discount_budget, _make_env
 from src.evaluation.dp_calibrated import _deg_class
-from src.evaluation.dp_calibrated_v2 import _plan_dp_v2, _execute_v2, _N_S_BUCKETS as _N_SB2
+from src.evaluation.dp_calibrated_v2 import _plan_dp_v2, _execute_v2
 from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table
 from src.evaluation.dp_calibrated_v3 import _plan_dp_v3, _execute_v3, _N_S_BUCKETS
 from src.evaluation.dp_calibrated_v3_obs import calibrate_v3_obs_table
