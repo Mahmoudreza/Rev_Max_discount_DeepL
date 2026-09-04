@@ -24,6 +24,8 @@ from src.evaluation.dp_calibrated_v3 import _plan_dp_v3, _execute_v3, _N_S_BUCKE
 from src.evaluation.dp_calibrated_v3_obs import calibrate_v3_obs_table
 
 C      = 0.3
+W_HIGH = 2.0    # Uniform(0, W_HIGH) per Definition 2.1
+assert W_HIGH == 2.0, f"W_HIGH must be 2.0 per Def 2.1; got {W_HIGH}"
 SEEDS  = [42, 123, 7]
 TIERS  = (1.0, 0.8, 0.5, 0.2, 0.0)
 DELTA  = 0.05
@@ -35,7 +37,7 @@ GRAPHS = {
     "Modular_FF": generate_modular_forest_fire([250,250], 0.37, 0.32, 0.05, seed=0),
     "FF_2000":    generate_forest_fire(2000, 0.37, 0.32, seed=1),
 }
-cfg = BudgetEnvConfig(production_cost=C, weight_high=1.0)
+cfg = BudgetEnvConfig(production_cost=C, weight_high=W_HIGH)
 
 # OLD values (seeds 0,1,2, n_sims=5) for comparison
 OLD = {
@@ -72,7 +74,7 @@ def eval_net_custom(net, graph, k_list, n_sims=5):
         revs2, revs3, acct_errs, bankrupts = [], [], [], []
         for seed in SEEDS:
             # v2
-            env = _make_env(graph, B=B, c=C, seed=seed, weight_high=1.0)
+            env = _make_env(graph, B=B, c=C, seed=seed, weight_high=W_HIGH)
             env.reset()
             rev2, _, _ = _execute_v2(env=env, ordering=ordering, plan=plan2,
                                      V=V2, A=A2, class_boundaries=cb2,
@@ -84,7 +86,7 @@ def eval_net_custom(net, graph, k_list, n_sims=5):
             bk2 = env._check_bankrupt()
 
             # v3
-            env3 = _make_env(graph, B=B, c=C, seed=seed, weight_high=1.0)
+            env3 = _make_env(graph, B=B, c=C, seed=seed, weight_high=W_HIGH)
             env3.reset()
             rev3, _, _, _ = _execute_v3(env=env3, ordering=ordering,
                                          dp3=dp3, tier3=tier3, V3=V3, A3=A3,

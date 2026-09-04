@@ -24,10 +24,11 @@ from src.models.policies.sequential_joint_policy import SequentialJointPolicy
 from src.utils.features import compute_node_features_fast, compute_static_features, build_graph_feature_cache
 from src.utils.helpers import graph_to_pyg_data, set_seed
 
-N_MC   = 5      # BudgetEnvConfig n_mc_samples
+N_MC   = 200    # BudgetEnvConfig n_mc_samples — must match paper (Def 2.1)
 ARM_K  = 50     # k_feat used during arm_b training (unconstrained, k=50)
 C      = 0.3
-W_HIGH = 1.0
+W_HIGH = 2.0    # Uniform(0, W_HIGH) per Definition 2.1
+assert W_HIGH == 2.0, f"W_HIGH must be 2.0 per Def 2.1; got {W_HIGH}"
 
 ARM_B_CKPT = os.path.join(_ROOT, "results/checkpoints/rev_gnn_lstm_densemix.pt")
 ARM_B_SHA  = "0b549f93"
@@ -77,7 +78,7 @@ def _avail_mask(env, n, device):
 def eval_arm_b_episode(pol, graph, cache, ei, B, seed, device):
     """
     Run one arm_b episode on BudgetRevenueEnv.
-    Returns total_revenue (float).
+    Returns (total_revenue, n_in_S, n_below_cost).
     """
     from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
     set_seed(seed)
@@ -87,6 +88,7 @@ def eval_arm_b_episode(pol, graph, cache, ei, B, seed, device):
     env = BudgetRevenueEnv(graph, cfg)
     env.reset()
     pol.reset_episode(device)
+    n_below = 0
     while env.available_nodes and not env._check_bankrupt():
         x  = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
         av = _avail_mask(env, n, device)
@@ -95,17 +97,29 @@ def eval_arm_b_episode(pol, graph, cache, ei, B, seed, device):
         ni = int(sc.argmax().item())
         d  = float(pol.get_discount_distribution(
              torch.cat([h[ni], ctx])).mean.item())
-        _, _, done, info = env.step(ni, d)
+        _, r, done, info = env.step(ni, d)
+        if 0 < r < C: n_below += 1
         pol.update_sequence_state(d, info["accepted"],
                                   info.get("revenue_step", 0.0))
         if done: break
-    return float(env.total_revenue)
+    return float(env.total_revenue), len(env.S), n_below
 
 
 def eval_arm_b_k(pol, graph, cache, ei, B, n_trials, device):
-    """Run arm_b for seeds 0..n_trials-1. Returns list of revenues."""
-    return [eval_arm_b_episode(pol, graph, cache, ei, B, s, device)
+    """Run arm_b for seeds 0..n_trials-1. Returns list of revenues (legacy)."""
+    return [eval_arm_b_episode(pol, graph, cache, ei, B, s, device)[0]
             for s in range(n_trials)]
+
+
+def eval_arm_b_k_full(pol, graph, cache, ei, B, n_trials, device):
+    """Run arm_b for seeds 0..n_trials-1.
+    Returns (revenues, n_in_S_list, n_below_list, profits)."""
+    revs, s_ts, bcs = [], [], []
+    for s in range(n_trials):
+        rev, n_s, bc = eval_arm_b_episode(pol, graph, cache, ei, B, s, device)
+        revs.append(rev); s_ts.append(n_s); bcs.append(bc)
+    profs = [r - C * s for r, s in zip(revs, s_ts)]
+    return revs, s_ts, bcs, profs
 
 
 @torch.no_grad()
