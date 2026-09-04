@@ -267,11 +267,17 @@ def run_network(net: str, out_path: str, device):
                               "n_in_S": _stats(ab_s_ts), "n_below": _stats(ab_bcs),
                               "final_budget": _stats(ab_fb)},
         }
-        print(f"  k={k:2d}  IE={_stats(ie_raw)['mean']:.1f}"
-              f"  GD={_stats(gd_raw)['mean']:.1f}"
-              f"  CDP={_stats(cdp_raw)['mean']:.1f}"
-              f"  CGS={_stats(cgs_revs)['mean']:.1f}"
-              f"  GNN={_stats(ab_revs)['mean']:.1f}"
+        # Primary metric: profit = revenue - c*n_in_S (budget problem answer)
+        # Secondary: revenue (for reference)
+        def _m(arr): return f"{_stats(arr)['mean']:+.2f}"
+        print(f"  k={k:2d}"
+              f"  profit: IE={_m(ie_prof)} GD={_m(gd_prof)}"
+              f" CDP={_m(cdp_profs)} CGS={_m(cgs_profs)} GNN={_m(ab_profs)}"
+              f"  | rev: IE={_stats(ie_raw)['mean']:.1f}"
+              f" GD={_stats(gd_raw)['mean']:.1f}"
+              f" CDP={_stats(cdp_raw)['mean']:.1f}"
+              f" CGS={_stats(cgs_revs)['mean']:.1f}"
+              f" GNN={_stats(ab_revs)['mean']:.1f}"
               f"  ({elapsed:.0f}s)", flush=True)
 
     shard = {"network": net, "n_trials": N_TRIALS, "seeds": SEEDS,
