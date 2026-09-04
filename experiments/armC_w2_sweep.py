@@ -249,12 +249,20 @@ def main():
     for net in args.networks:
         res = run_net(net, pol_c, pol_b, device, "results/logs")
         all_results["networks"][net] = res
+        # Write shard immediately so parallel runs don't race on the merged file
+        shard_out = f"results/logs/armC_w2_{net}.json"
+        os.makedirs("results/logs", exist_ok=True)
+        with open(shard_out, "w") as f:
+            json.dump({**{k: all_results[k] for k in all_results if k != "networks"},
+                       "network": net, "results": res}, f, indent=2)
+        print(f"  shard → {shard_out}", flush=True)
 
-    out = "results/logs/armC_w2.json"
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as f:
-        json.dump(all_results, f, indent=2)
-    print(f"\nSaved → {out}")
+    # If all networks ran in this process, also write the merged file
+    if len(all_results["networks"]) == len(args.networks):
+        out = "results/logs/armC_w2.json"
+        with open(out, "w") as f:
+            json.dump(all_results, f, indent=2)
+        print(f"\nSaved → {out}")
 
 
 if __name__ == "__main__":
