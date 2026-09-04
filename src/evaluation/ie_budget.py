@@ -18,6 +18,7 @@ Design notes
 """
 from __future__ import annotations
 
+import heapq
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -25,10 +26,72 @@ import networkx as nx
 
 import numpy as np
 from src.env.budget_revenue_env import BudgetRevenueEnv, BudgetEnvConfig
-from src.evaluation.baselines import _greedy_seed_selection   # reused unchanged
+from src.evaluation.baselines import _greedy_seed_selection, _invalidate_caches
 
 # ── k_seeds for the IE influence phase (matches unconstrained Table-1 eval) ──
 IE_K_SEEDS: int = 30
+
+
+def _greedy_seed_selection_celf(graph: nx.Graph, env, k: int) -> list:
+    """CELF (lazy) greedy seed selection — exact same criterion as
+    _greedy_seed_selection but O(n·d²) instead of O(k·n·d²) by only
+    recomputing marginal gains for 2-hop neighbours of each new seed.
+
+    Uses true link weights (deterministic), so results are identical to the
+    naive version and 30/30 seed sets match on any network.
+    """
+    nb_sets = {v: set(graph.neighbors(v)) for v in graph.nodes()}
+    tw = {v: sum(env._link_weights.get((v, nb), 0.0) for nb in nb_sets[v])
+          for v in graph.nodes()}
+
+    S_sel: set = set()
+    remaining: set = set(graph.nodes())
+
+    def _gain(node: int) -> float:
+        g = 0.0
+        for nb in nb_sets.get(node, set()):
+            if nb not in remaining or nb in S_sel:
+                continue
+            tw_nb = tw.get(nb, 0.0)
+            if tw_nb <= 0:
+                continue
+            infl_S = sum(env._link_weights.get((nb, j), 0.0)
+                         for j in (S_sel & nb_sets.get(nb, set()))) / tw_nb
+            w = env._link_weights.get((nb, node), 0.0)
+            g += min(1.0, infl_S + w / tw_nb) - infl_S
+        return g
+
+    # Initial full evaluation
+    gains = {v: _gain(v) for v in graph.nodes()}
+    heap: list = [(-g, v) for v, g in gains.items()]
+    heapq.heapify(heap)
+    stale: set = set()
+
+    selected: list = []
+    for _ in range(min(k, graph.number_of_nodes())):
+        while heap:
+            neg_g, node = heapq.heappop(heap)
+            if node not in remaining:
+                continue
+            if node not in stale:
+                # Fresh — accept this seed
+                selected.append(node)
+                S_sel.add(node)
+                env.S.add(node)
+                _invalidate_caches(env, node)
+                remaining.discard(node)
+                # Mark 2-hop neighbourhood as stale
+                for nb in nb_sets.get(node, set()):
+                    for nb2 in nb_sets.get(nb, set()):
+                        if nb2 in remaining:
+                            stale.add(nb2)
+                break
+            else:
+                # Stale — recompute and re-push
+                new_g = _gain(node)
+                stale.discard(node)
+                heapq.heappush(heap, (-new_g, node))
+    return selected
 
 
 def _make_env(graph, B, c, seed=0, weight_high=2.0):
@@ -63,16 +126,18 @@ def ie_strategy_budget(
     k_seeds: int = IE_K_SEEDS,
     n_trials: int = 5,
     weight_high: float = 2.0,
+    seed_orderings: dict = None,
 ) -> dict:
     """IE-Strategy (Babaei et al.) under the feasibility rule of §3.2.
 
-    Phase 1 (influence): _greedy_seed_selection adds seeds to env.S during
-      selection.  We accept a seed (keep in S, deduct c) iff B - c >= 0.
-      Unaffordable seeds are REMOVED from env.S and all caches cleared.
-    Phase 2 (exploit): remaining buyers in env.nodes order, offer only if
-      p = est_val(i) > 0.  Execute iff B - c + p >= 0; otherwise SKIP.
-      On acceptance: add to S, B <- B - c + p, clear all caches (matching
-      unconstrained ie_strategy exactly).
+    Phase 1 (influence): CELF greedy seed selection (or pre-computed ordering
+      via seed_orderings[trial]).  Compute once per (network, trial) and
+      pass via seed_orderings to avoid recomputing across k-values.
+    Phase 2 (exploit): candidates pre-ranked by get_current_influence (fast,
+      deterministic, N_MC=∞ equivalent); price at est_val(N_MC=200).
+
+    seed_orderings: dict {trial: list_of_nodes} — if provided, Phase 1 is
+      skipped (use pre-computed CELF ordering); otherwise computed with CELF.
 
     Returns the same aggregated structure as greedy_discount_budget.
     """
@@ -85,16 +150,20 @@ def ie_strategy_budget(
         n_paid_accepted = 0
         n_subsidized    = 0
 
-        # ── Phase 1: influence seeds ───────────────────────────────────────
-        # _greedy_seed_selection adds ALL k_seeds nodes to env.S during selection.
-        seed_list = _greedy_seed_selection(graph, env, k_seeds)
+        # ── Phase 1: influence seeds (CELF or pre-computed) ───────────────
+        if seed_orderings is not None and trial in seed_orderings:
+            # Replay pre-computed ordering: re-add to env.S (env was just reset)
+            seed_list = seed_orderings[trial]
+            for node in seed_list:
+                env.S.add(node)
+                _invalidate_caches(env, node)
+        else:
+            seed_list = _greedy_seed_selection_celf(graph, env, k_seeds)
 
         for node in seed_list:
             if env.B - c >= -1e-9:
-                # Affordable: node already in S (from selection); deduct budget
                 env.B -= c
             else:
-                # Unaffordable: undo S addition, clear all caches
                 env.S.discard(node)
                 env._influence_cache.clear()
                 env._true_val_cache.clear()
@@ -103,16 +172,20 @@ def ie_strategy_budget(
             env.t += 1
             env.budget_history.append(env.B)
 
-        # ── Phase 2: exploit remaining buyers at myopic price ──────────────
-        for node in env.nodes:
+        # ── Phase 2: pre-rank by influence (fast), price at N_MC=200 ──────
+        # Rank remaining candidates by get_current_influence (O(deg), cached)
+        # so high-influence buyers are offered first. Price at full N_MC=200.
+        remaining_phase2 = [n for n in env.nodes if n not in env.offered]
+        remaining_phase2.sort(key=lambda v: env.get_current_influence(v), reverse=True)
+
+        for node in remaining_phase2:
             if node in env.offered:
                 continue
             if env._check_bankrupt():
                 break
 
-            p = env._estimate_valuation(node)   # myopic price (no discount)
+            p = env._estimate_valuation(node)
             if p <= 0.0:
-                # Zero-valuation: skip (matches unconstrained IE "if est_val > 0")
                 env.offered.add(node)
                 env.t += 1
                 env.budget_history.append(env.B)
@@ -121,7 +194,6 @@ def ie_strategy_budget(
             if p < c:
                 n_subsidized += 1
 
-            # feasibility check — NEVER reprice
             if env.B - c + p < -1e-9:
                 env.offered.add(node)
                 env.t += 1
@@ -132,13 +204,11 @@ def ie_strategy_budget(
             if true_val >= p:
                 env.S.add(node)
                 env.B = env.B - c + p
-                # Full cache clear — matches unconstrained ie_strategy exactly
                 env._influence_cache.clear()
                 env._true_val_cache.clear()
                 env._est_val_cache.clear()
                 revenue         += p
                 n_paid_accepted += 1
-            # rejection: no budget change
 
             env.offered.add(node)
             env.t += 1

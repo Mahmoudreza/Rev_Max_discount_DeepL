@@ -40,9 +40,13 @@ from src.evaluation.dp_calibrated_v3_obs import calibrate_v3_obs_table
 from _cal_episode_utils import calibrate, arm3_episode
 
 try:
-    from src.evaluation.ie_budget import ie_strategy_budget
+    from src.evaluation.ie_budget import (
+        ie_strategy_budget, _greedy_seed_selection_celf, IE_K_SEEDS as _IE_K_SEEDS,
+    )
 except ImportError:
     from src.evaluation.budget_baselines import ie_strategy_budget
+    _greedy_seed_selection_celf = None
+    _IE_K_SEEDS = 30
 
 from _arm_b_utils import load_arm_b, make_ei, eval_arm_b_k_full, ARM_B_SHA
 
@@ -167,6 +171,20 @@ def run_network(net: str, out_path: str, device):
     print(f"  Total calibration: {time.time()-t_cal:.0f}s  "
           f"(CGS={t_cgs:.0f}s  v2={t_v2:.0f}s  v3={t_v3:.0f}s)", flush=True)
 
+    # ── IE seed orderings: compute ONCE per (network, trial) via CELF ─────────
+    ie_seed_orderings = None
+    if _greedy_seed_selection_celf is not None:
+        t_ie_pre = time.time()
+        ie_seed_orderings = {}
+        for trial in range(N_TRIALS):
+            env_tmp = _make_env(graph, B=float("inf"), c=C, seed=trial,
+                                weight_high=W_HIGH)
+            env_tmp.reset()
+            ie_seed_orderings[trial] = _greedy_seed_selection_celf(
+                graph, env_tmp, _IE_K_SEEDS)
+        print(f"  IE CELF precomputed ({N_TRIALS} trials) in "
+              f"{time.time()-t_ie_pre:.1f}s", flush=True)
+
     results = {}
     for k in K_VALUES:
         B  = k * C
@@ -174,7 +192,8 @@ def run_network(net: str, out_path: str, device):
 
         # ── IE + Greedy (fast, no calibration, W_HIGH explicit) ───────────────
         t_ie = time.time()
-        r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
+        r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH,
+                                   seed_orderings=ie_seed_orderings)
         r_gd  = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
         ie_raw = _raw(r_ie, N_TRIALS); gd_raw = _raw(r_gd, N_TRIALS)
         ie_prof = _profit_from_dict(r_ie, N_TRIALS); gd_prof = _profit_from_dict(r_gd, N_TRIALS)

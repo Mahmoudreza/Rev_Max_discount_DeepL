@@ -338,7 +338,8 @@ class RevenueEnv:
         """Return current normalized influence on node from S.
 
         Uses true link weights (deterministic given the episode's weight sample).
-        Used by feature computation in src/utils/features.py.
+        Cached in _influence_cache; invalidated for neighbours when a node joins S
+        (see env.step line ~161).
 
         Args:
             node: Target buyer node.
@@ -346,17 +347,22 @@ class RevenueEnv:
         Returns:
             Normalized influence in [0, 1].
         """
+        if node in self._influence_cache:
+            return self._influence_cache[node]
         neighbors = list(self.graph.neighbors(node))
         if not neighbors:
             return 0.0
         total_weight = sum(self._link_weights.get((node, nb), 0.0) for nb in neighbors)
         if total_weight == 0:
             return 0.0
+        nb_set = set(neighbors)
         influence_from_S = sum(
             self._link_weights.get((node, j), 0.0)
-            for j in self.S if j in set(neighbors)
+            for j in self.S if j in nb_set
         )
-        return influence_from_S / total_weight
+        result = influence_from_S / total_weight
+        self._influence_cache[node] = result
+        return result
 
     def _get_observation(self) -> Dict:
         """Construct observation dict for the current state.
