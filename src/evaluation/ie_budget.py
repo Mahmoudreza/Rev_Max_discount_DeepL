@@ -263,6 +263,13 @@ def ie_strategy_budget(
             env.t += 1
             env.budget_history.append(env.B)
 
+        # Budget identity: profit = revenue - c*|S_T| = B_T - B_0
+        _profit_ep = revenue - c * len(env.S)
+        _bt_b0     = env.B - B
+        assert abs(_profit_ep - _bt_b0) < 1e-6, (
+            f"ie_strategy_budget profit identity FAIL trial={trial}: "
+            f"profit={_profit_ep:.8f}  B_T-B_0={_bt_b0:.8f}")
+
         results.append({
             "revenue":           revenue,
             "n_accepted":        n_paid_accepted,

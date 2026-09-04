@@ -145,11 +145,15 @@ def _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k):
                                        b_steps=b_steps, delta=DELTA, tiers=TIERS, log_steps=0)
         # Composite: pick the arm that achieved higher revenue
         if rev2 >= rev3:
-            rev_c, ns_c = float(rev2), int(ns2)
+            rev_c, ns_c, env_win = float(rev2), int(ns2), env2
         else:
-            rev_c, ns_c = float(rev3), int(ns3)
+            rev_c, ns_c, env_win = float(rev3), int(ns3), env3
         profit_c = rev_c - C * ns_c
-        fb_c     = B + profit_c          # B_T = B_0 + profit
+        fb_c     = env_win.B              # B_T from live env (not formula)
+        # Budget identity guard
+        assert abs(profit_c - (fb_c - B)) < 1e-6, (
+            f"CalDP profit identity FAIL seed={seed}: "
+            f"profit={profit_c:.8f}  B_T-B_0={fb_c - B:.8f}")
         cdp_revs.append(rev_c); cdp_ns.append(ns_c)
         cdp_profs.append(profit_c); cdp_fbs.append(fb_c)
     return cdp_revs, cdp_ns, cdp_profs, cdp_fbs
@@ -235,8 +239,13 @@ def run_network(net: str, out_path: str, device):
                     n_s = n_sk.get("n_in_S", 0); bc = n_sk.get("n_below_cost", 0)
                 else:
                     n_s = int(n_sk); bc = 0
+                profit_v = float(rev) - C * n_s
+                # Budget identity guard: profit = B_T - B_0
+                assert abs(profit_v - (env.B - B)) < 1e-6, (
+                    f"CGS profit identity FAIL seed={seed}: "
+                    f"profit={profit_v:.8f}  B_T-B_0={env.B - B:.8f}")
                 cgs_revs.append(float(rev)); cgs_s_ts.append(n_s); cgs_bcs.append(bc)
-                cgs_profs.append(float(rev) - C * n_s)
+                cgs_profs.append(profit_v)
             except Exception as e:
                 print(f"  CGS err seed={seed}: {e}")
                 cgs_revs.append(float("nan")); cgs_profs.append(float("nan"))
