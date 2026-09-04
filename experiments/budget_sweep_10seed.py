@@ -32,8 +32,11 @@ from src.env.graph_generators import (
     generate_forest_fire, generate_modular_forest_fire, load_rice_facebook,
 )
 from src.evaluation.budget_baselines import greedy_discount_budget, _make_env
-from src.evaluation.dp_calibrated_v2_obs import dp_calibrated_v2_obs_budget
-from src.evaluation.dp_calibrated_v3_obs import dp_calibrated_v3_obs_budget
+from src.evaluation.dp_calibrated import _deg_class
+from src.evaluation.dp_calibrated_v2 import _plan_dp_v2, _execute_v2, _N_S_BUCKETS as _N_SB2
+from src.evaluation.dp_calibrated_v2_obs import calibrate_v2_obs_table
+from src.evaluation.dp_calibrated_v3 import _plan_dp_v3, _execute_v3, _N_S_BUCKETS
+from src.evaluation.dp_calibrated_v3_obs import calibrate_v3_obs_table
 from _cal_episode_utils import calibrate, arm3_episode
 
 try:
@@ -52,6 +55,8 @@ N_SIMS       = 5
 W_HIGH       = 2.0    # Uniform(0, W_HIGH) per Definition 2.1
 N_MC         = 200    # MC samples for valuation estimate
 CGS_LAM      = 1.0
+TIERS        = (1.0, 0.8, 0.5, 0.2, 0.0)
+DELTA        = 0.05
 NETWORKS_ALL = ["polblogs", "FF_1000", "Rice_FB", "Modular_FF", "FF_2000"]
 
 assert W_HIGH == 2.0, f"W_HIGH must be 2.0 per Def 2.1; got {W_HIGH}"
@@ -105,6 +110,38 @@ def _stats(vals):
             "all": [round(float(v), 3) for v in vals]}
 
 
+def _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k):
+    """Plan + execute Cal-DP v2 and v3 for one k. Returns (v2_revs, v3_revs)."""
+    n = graph.number_of_nodes()
+    ordering = sorted(graph.nodes(), key=lambda v: graph.degree(v), reverse=True)
+    all_deg  = np.array([graph.degree(v) for v in ordering], dtype=float)
+    cpos     = np.array([_deg_class(int(all_deg[i]), cb2) for i in range(n)], dtype=np.int32)
+    B = k * C; b_steps = max(1, int(B / DELTA) + 1)
+
+    plan2 = _plan_dp_v2(n_total=n, V=V2, A=A2, P=P2, class_of_pos=cpos,
+                        B=B, c=C, tiers=TIERS, delta=DELTA)
+    dp3, tier3 = _plan_dp_v3(n_total=n, V3=V3, A3=A3, T=T3, class_of_pos=cpos,
+                              B=B, c=C, sb_size=sb3, n_s_buckets=_N_S_BUCKETS,
+                              tiers=TIERS, delta=DELTA)
+    v2_revs, v3_revs = [], []
+    for seed in range(N_TRIALS):
+        env2 = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
+        env2.reset()
+        rev2, _, _ = _execute_v2(env=env2, ordering=ordering, plan=plan2,
+                                  V=V2, A=A2, class_boundaries=cb2, infl_boundaries=ib2,
+                                  c=C, class_of_pos=cpos,
+                                  dp_table=[[0.0]*(n+1) for _ in range(b_steps+1)],
+                                  b_steps=b_steps, delta=DELTA, tiers=TIERS)
+        env3 = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
+        env3.reset()
+        rev3, _, _, _ = _execute_v3(env=env3, ordering=ordering, dp3=dp3, tier3=tier3,
+                                     V3=V3, A3=A3, class_boundaries=cb3, sb_size=sb3,
+                                     c=C, class_of_pos=cpos, n_s_buckets=_N_S_BUCKETS,
+                                     b_steps=b_steps, delta=DELTA, tiers=TIERS, log_steps=0)
+        v2_revs.append(float(rev2)); v3_revs.append(float(rev3))
+    return v2_revs, v3_revs
+
+
 def run_network(net: str, out_path: str, device):
     graph = load_graph(net)
     cfg   = BudgetEnvConfig(production_cost=C, weight_high=W_HIGH, n_mc_samples=N_MC)
@@ -114,34 +151,41 @@ def run_network(net: str, out_path: str, device):
     arm_b = load_arm_b(device)
     ei, cache = make_ei(graph, device)
 
-    # Pre-calibrate CGS once per graph (expensive but shared across all k)
-    print(f"  calibrating CGS...", flush=True)
+    # ── All calibrations ONCE per network ─────────────────────────────────────
+    t_cal = time.time()
+    print(f"  [1/3] CGS calibrate...", flush=True)
     V, A, P, cb, ib = calibrate(graph, cfg)
+    t_cgs = time.time() - t_cal; print(f"        CGS done  {t_cgs:.0f}s", flush=True)
+
+    print(f"  [2/3] Cal-DP v2 calibrate (n_sims={N_SIMS})...", flush=True)
+    V2, A2, P2, cb2, ib2 = calibrate_v2_obs_table(graph, cfg, n_sims=N_SIMS, seed=0)
+    t_v2 = time.time()-t_cal-t_cgs; print(f"        v2 done  {t_v2:.0f}s", flush=True)
+
+    print(f"  [3/3] Cal-DP v3 calibrate (n_sims={N_SIMS})...", flush=True)
+    V3, A3, T3, cb3, sb3 = calibrate_v3_obs_table(graph, cfg, n_sims=N_SIMS, seed=0)
+    t_v3 = time.time()-t_cal-t_cgs-t_v2; print(f"        v3 done  {t_v3:.0f}s", flush=True)
+    print(f"  Total calibration: {time.time()-t_cal:.0f}s  "
+          f"(CGS={t_cgs:.0f}s  v2={t_v2:.0f}s  v3={t_v3:.0f}s)", flush=True)
 
     results = {}
     for k in K_VALUES:
         B  = k * C
         t0 = time.time()
 
-        # ── Baselines ─────────────────────────────────────────────────────────
-        # Pass weight_high=W_HIGH explicitly (both funcs default to 2.0 anyway,
-        # but explicit is safer against future default changes)
+        # ── IE + Greedy (fast, no calibration, W_HIGH explicit) ───────────────
+        t_ie = time.time()
         r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
         r_gd  = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
-        r2    = dp_calibrated_v2_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
-        r3    = dp_calibrated_v3_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
+        ie_raw = _raw(r_ie, N_TRIALS); gd_raw = _raw(r_gd, N_TRIALS)
+        ie_prof = _profit_from_dict(r_ie, N_TRIALS); gd_prof = _profit_from_dict(r_gd, N_TRIALS)
+        ie_s_t  = _raw_key(r_ie, "n_in_S", N_TRIALS); gd_s_t = _raw_key(r_gd, "n_in_S", N_TRIALS)
+        t_ie_done = time.time()-t_ie
 
-        ie_raw  = _raw(r_ie, N_TRIALS)
-        gd_raw  = _raw(r_gd, N_TRIALS)
-        v2_raw  = _raw(r2, N_TRIALS)
-        v3_raw  = _raw(r3, N_TRIALS)
-        # Cal-DP composite: per-seed max(v2, v3)
+        # ── Cal-DP: plan+execute only (calibration already done above) ────────
+        t_cdp = time.time()
+        v2_raw, v3_raw = _caldp_execute(graph, cfg, V2, A2, P2, cb2, ib2, V3, A3, T3, cb3, sb3, k)
         cdp_raw = [max(a, b) for a, b in zip(v2_raw, v3_raw)]
-
-        ie_prof  = _profit_from_dict(r_ie, N_TRIALS)
-        gd_prof  = _profit_from_dict(r_gd, N_TRIALS)
-        ie_s_t   = _raw_key(r_ie, "n_in_S", N_TRIALS)
-        gd_s_t   = _raw_key(r_gd, "n_in_S", N_TRIALS)
+        t_cdp_done = time.time()-t_cdp
 
         # ── CGS (arm3, lambda=1.0) ────────────────────────────────────────────
         # arm3_episode returns (revenue, n_sk) where n_sk is int (|S_T|)
