@@ -124,8 +124,10 @@ def run_network(net: str, out_path: str, device):
         t0 = time.time()
 
         # ── Baselines ─────────────────────────────────────────────────────────
-        r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS)
-        r_gd  = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS)
+        # Pass weight_high=W_HIGH explicitly (both funcs default to 2.0 anyway,
+        # but explicit is safer against future default changes)
+        r_ie  = ie_strategy_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
+        r_gd  = greedy_discount_budget(graph, B, C, n_trials=N_TRIALS, weight_high=W_HIGH)
         r2    = dp_calibrated_v2_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
         r3    = dp_calibrated_v3_obs_budget(graph, cfg, B, C, n_trials=N_TRIALS, n_sims=N_SIMS)
 
