@@ -193,6 +193,13 @@ def run_network(net: str, out_path: str, device):
         for seed in SEEDS:
             env = _make_env(graph, B=B, c=C, seed=seed, weight_high=cfg.weight_high)
             env.reset()
+            # DIAGNOSTIC: print realized edge weights for seed=0, first k only
+            if seed == 0 and k == K_VALUES[0]:
+                _w = np.array(list(env._link_weights.values()))
+                print(f"  [DIAG net={net} k={k} seed=0] "
+                      f"cfg.W_HIGH={cfg.weight_high:.1f}  "
+                      f"link_mean={_w.mean():.4f}  link_max={_w.max():.4f}",
+                      flush=True)
             try:
                 rev, n_sk = arm3_episode(env, graph, A, V, cb, ib, CGS_LAM)
                 # n_sk may be int or dict (future-proof)
