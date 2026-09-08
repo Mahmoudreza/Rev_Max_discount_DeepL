@@ -48,6 +48,7 @@ K_VALUES    = [5, 10, 15, 20, 30, 40]
 TRAIN_SEEDS = list(range(5))   # inner rollout seeds per (graph, k)
 IN_DIM      = 21               # same feature set as arm_b (includes budget dummy)
 N_MC_TRAIN  = 5                # MC samples during training (eval uses N_MC=200); ~40× speedup
+MAX_EP_STEPS = 200             # max steps per training episode (BPTT truncation + consistent timing)
 _ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CKPT_DIR    = os.path.join(_ROOT, "results", "checkpoints")
 README_PATH = os.path.join(CKPT_DIR, "README.md")
@@ -111,8 +112,9 @@ def p1_episode(pol_skip, arm_b, graph, ei, cache, B, seed, device):
 
     ce_losses, disc_losses = [], []
     consec_skips = 0
+    step_count = 0
 
-    while env.available_nodes and not env._check_bankrupt():
+    while env.available_nodes and not env._check_bankrupt() and step_count < MAX_EP_STEPS:
         x   = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
         av  = _avail_mask(env, n, device)
         if not av.any(): break
@@ -136,7 +138,6 @@ def p1_episode(pol_skip, arm_b, graph, ei, cache, B, seed, device):
 
         # --- Act in environment ---
         if target == n:
-            # Skip: no env.step, advance LSTM with null
             pol_skip.update_sequence_state(0.0, False, 0.0)
             arm_b.update_sequence_state(0.0, False, 0.0)
             consec_skips += 1
@@ -149,6 +150,7 @@ def p1_episode(pol_skip, arm_b, graph, ei, cache, B, seed, device):
             pol_skip.update_sequence_state(d_exp, acc, info.get("revenue_step", 0.0))
             arm_b.update_sequence_state(d_exp, acc, info.get("revenue_step", 0.0))
             if done: break
+        step_count += 1
 
     loss = torch.stack(ce_losses).mean()
     if disc_losses:
@@ -169,8 +171,9 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
 
     log_probs, entropies = [], []
     consec_skips = 0; skip_cap_hit = False
+    step_count = 0
 
-    while env.available_nodes and not env._check_bankrupt():
+    while env.available_nodes and not env._check_bankrupt() and step_count < MAX_EP_STEPS:
         x   = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
         av  = _avail_mask(env, n, device)
         if not av.any(): break
@@ -195,6 +198,7 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
             acc = bool(info.get("accepted", r > 0))
             pol_skip.update_sequence_state(d, acc, info.get("revenue_step", 0.0))
             if done: break
+        step_count += 1
 
     profit = float(env.B) - B   # = R - c|S_T|
     lp = torch.stack(log_probs) if log_probs else torch.zeros(1, device=device)
