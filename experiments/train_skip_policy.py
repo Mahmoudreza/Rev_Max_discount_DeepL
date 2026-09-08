@@ -47,6 +47,7 @@ GRAD_CLIP   = 1.0
 K_VALUES    = [5, 10, 15, 20, 30, 40]
 TRAIN_SEEDS = list(range(5))   # inner rollout seeds per (graph, k)
 IN_DIM      = 21               # same feature set as arm_b (includes budget dummy)
+N_MC_TRAIN  = 5                # MC samples during training (eval uses N_MC=200); ~40× speedup
 _ROOT       = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CKPT_DIR    = os.path.join(_ROOT, "results", "checkpoints")
 README_PATH = os.path.join(CKPT_DIR, "README.md")
@@ -103,10 +104,10 @@ def p1_episode(pol_skip, arm_b, graph, ei, cache, B, seed, device):
     n = graph.number_of_nodes()
     set_seed(seed)
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed,
-                          weight_high=W_HIGH, n_mc_samples=N_MC)
+                          weight_high=W_HIGH, n_mc_samples=N_MC_TRAIN)
     env = BudgetRevenueEnv(graph, cfg); env.reset()
     pol_skip.reset_episode(device)
-    arm_b.reset_episode(device)
+    arm_b.reset_episode(device)  # type: ignore
 
     ce_losses, disc_losses = [], []
     consec_skips = 0
@@ -162,7 +163,7 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
     n = graph.number_of_nodes()
     set_seed(seed)
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed,
-                          weight_high=W_HIGH, n_mc_samples=N_MC)
+                          weight_high=W_HIGH, n_mc_samples=N_MC_TRAIN)
     env = BudgetRevenueEnv(graph, cfg); env.reset()
     pol_skip.reset_episode(device)
 
