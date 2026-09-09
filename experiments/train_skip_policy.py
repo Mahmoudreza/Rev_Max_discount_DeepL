@@ -246,8 +246,13 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
         else:
             consec_skips = 0
             node = env.nodes[action]
-            d = float(pol_skip.get_discount_distribution(
-                torch.cat([h[action], ctx])).mean.item())
+            # Sample discount stochastically so pricing_head gets REINFORCE gradient
+            dist_disc = pol_skip.get_discount_distribution(torch.cat([h[action], ctx]))
+            d_tensor  = dist_disc.rsample().clamp(1e-6, 1.0 - 1e-6)
+            lp_disc   = dist_disc.log_prob(d_tensor)
+            d         = float(d_tensor.item())
+            # Joint log_prob = log_π(node) + log_π(discount | node)
+            log_probs[-1] = log_probs[-1] + lp_disc
             v_hat = float(env._estimate_valuation(node))
             price = v_hat * (1.0 - d)
             _, r, env_done, info = env.step(action, d)
