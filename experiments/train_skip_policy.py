@@ -90,10 +90,11 @@ def append_readme(msg):
 # ── Skip-head calibration ────────────────────────────────────────────────────
 
 def calibrate_skip_bias(pol_skip, graphs, eis, caches, device, n_steps=30):
-    """Set skip_head last-layer bias to mean(buyer_scores) - 1*std(buyer_scores).
-    Ensures skip fires ~16% of the time initially (not always, not never).
+    """Set skip_head last-layer bias to mean(max_buyer_logit_per_step) - 2.2.
+    With arm_b weights, the softmax is winner-takes-all (best buyer dominates).
+    skip_sc = max_buyer - 2.2  ⟹  P(skip vs best buyer) ≈ sigmoid(-2.2) ≈ 10%.
     """
-    scores_all = []
+    max_per_step = []   # max buyer logit at each state
     with torch.no_grad():
         for g, ei, cache in zip(graphs[:3], eis[:3], caches[:3]):
             n = g.number_of_nodes()
@@ -108,7 +109,7 @@ def calibrate_skip_bias(pol_skip, graphs, eis, caches, device, n_steps=30):
                 if not av.any(): break
                 sc_full, h, ctx, _ = pol_skip.forward(x, ei, av)
                 sc_buyers = sc_full[:-1][av]      # available buyer raw logits
-                scores_all.extend(sc_buyers.cpu().tolist())
+                max_per_step.append(float(sc_buyers.max().item()))
                 ni = int(sc_full[:-1].argmax().item())
                 d  = float(pol_skip.get_discount_distribution(
                     torch.cat([h[ni], ctx])).mean.item())
@@ -117,17 +118,20 @@ def calibrate_skip_bias(pol_skip, graphs, eis, caches, device, n_steps=30):
                 pol_skip.update_sequence_state(d, acc, info.get("revenue_step", 0.0))
                 if done: break
 
-    if not scores_all:
+    if not max_per_step:
         print("calibrate_skip_bias: no samples — bias stays at 0", flush=True)
         return
-    arr = np.array(scores_all)
-    mean_sc, std_sc = float(arr.mean()), float(arr.std())
-    target = mean_sc - std_sc   # skip competes below ~16th pct of buyer scores
-    # set bias of final linear in skip_head = Sequential(Lin, ReLU, Lin)
+    mean_max = float(np.mean(max_per_step))
+    std_max  = float(np.std(max_per_step))
+    # P(skip) = sigmoid(skip_sc - max_buyer_sc) ≈ sigmoid(-2.2) ≈ 10%
+    target = mean_max - 2.2
     nn.init.constant_(pol_skip.skip_head[-1].bias, target)
     nn.init.zeros_(pol_skip.skip_head[-1].weight)
-    print(f"calibrate_skip_bias: n={len(arr)}  mean={mean_sc:.3f}  std={std_sc:.3f}"
-          f"  → skip_bias={target:.3f}", flush=True)
+    # Diagnostic: what is P(skip) relative to a typical step?
+    p_skip = 1.0 / (1.0 + np.exp(2.2))
+    print(f"calibrate_skip_bias: n_steps={len(max_per_step)}"
+          f"  mean_max={mean_max:.3f}  std_max={std_max:.3f}"
+          f"  → skip_bias={target:.3f}  P(skip vs best)≈{p_skip:.3f}", flush=True)
 
 
 # ── Phase 1 helpers ───────────────────────────────────────────────────────────
@@ -215,7 +219,7 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
     env = BudgetRevenueEnv(graph, cfg); env.reset()
     pol_skip.reset_episode(device)
 
-    log_probs, entropies, step_rewards = [], [], []
+    log_probs, entropies, step_rewards, is_skip_flags = [], [], [], []
     consec_skips = 0; skip_cap_hit = False
     step_count = 0
 
@@ -231,11 +235,14 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
         entropies.append(dist.entropy())
 
         step_reward = 0.0
-        if action == n:  # skip
+        is_skip = (action == n)
+        done_flag = False
+        if is_skip:
             pol_skip.update_sequence_state(0.0, False, 0.0)
             consec_skips += 1
             if consec_skips >= SKIP_CAP:
-                skip_cap_hit = True; break
+                skip_cap_hit = True
+                done_flag = True
         else:
             consec_skips = 0
             node = env.nodes[action]
@@ -243,23 +250,25 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
                 torch.cat([h[action], ctx])).mean.item())
             v_hat = float(env._estimate_valuation(node))
             price = v_hat * (1.0 - d)
-            _, r, done, info = env.step(action, d)
+            _, r, env_done, info = env.step(action, d)
             acc = bool(info.get("accepted", r > 0))
             pol_skip.update_sequence_state(d, acc, info.get("revenue_step", 0.0))
-            if acc: step_reward = price - C   # marginal profit (can be negative)
-            if done: break
+            if acc: step_reward = price - C
+            if env_done: done_flag = True
+        # Always append before break so len(log_probs)==len(step_rewards)
         step_rewards.append(step_reward)
+        is_skip_flags.append(is_skip)
         step_count += 1
+        if done_flag: break
 
-    profit = float(env.B) - B   # = R - c|S_T|
+    profit = float(env.B) - B
     lp = torch.stack(log_probs) if log_probs else torch.zeros(1, device=device)
     en = torch.stack(entropies) if entropies else torch.zeros(1, device=device)
-    # Per-step returns (suffix sums)
     G = []; cum = 0.0
-    for rw in reversed(step_rewards):
-        cum += rw; G.append(cum)
+    for rw in reversed(step_rewards): cum += rw; G.append(cum)
     G.reverse()
-    return lp, en, profit, skip_cap_hit, G if len(G) == len(step_rewards) else None
+    n_skips = sum(is_skip_flags)
+    return lp, en, profit, skip_cap_hit, (G if len(G) == len(step_rewards) else None), n_skips
 
 
 # ── Main training loop ────────────────────────────────────────────────────────
@@ -291,11 +300,18 @@ def train(args, pol_skip_init=None):
         missing, unexpected = pol_skip.load_state_dict(arm_b_sd, strict=False)
         print(f"arm_b_init: loaded {len(arm_b_sd)-len(missing)} keys "
               f"(missing={len(missing)} = skip_head, unexpected={len(unexpected)})", flush=True)
-        # Freeze everything except skip_head so arm_b behaviour is preserved
+        # Freeze encoder + lstm + selection_head; train skip_head + discount_head.
+        # Rationale: arm_b discounts at 0.97 → price ≈ 0.03*v_hat << c=0.3 even for
+        # warm buyers. Pricing must also adapt; selection order stays arm_b-like.
+        # Use "skip" / "discount" allow-list (robust to exact attribute names).
+        TRAINABLE_KEYS = ("skip", "discount")
         for name, p in pol_skip.named_parameters():
-            p.requires_grad_("skip_head" in name)
+            p.requires_grad_(any(k in name for k in TRAINABLE_KEYS))
         n_trainable = sum(p.numel() for p in pol_skip.parameters() if p.requires_grad)
-        print(f"  trainable params: {n_trainable} (skip_head only)", flush=True)
+        n_frozen    = sum(p.numel() for p in pol_skip.parameters() if not p.requires_grad)
+        trainable_names = [n for n,p in pol_skip.named_parameters() if p.requires_grad]
+        print(f"  trainable: {n_trainable}  frozen: {n_frozen}", flush=True)
+        print(f"  trainable params: {trainable_names}", flush=True)
         args.skip_p1 = True   # no imitation phase
         calibrate_skip_bias(pol_skip, graphs, eis, caches, device)
 
@@ -347,6 +363,7 @@ def train(args, pol_skip_init=None):
         ep_profits, ep_caps = [], 0
         ep_losses = []
 
+        ep_n_skips = 0
         for gi, (g, ei, cache) in enumerate(zip(graphs, eis, caches)):
             for k in K_VALUES:
                 B = k * C
@@ -354,9 +371,10 @@ def train(args, pol_skip_init=None):
                 b_val = baseline[bkey]
 
                 for ts in TRAIN_SEEDS:
-                    lp, en, profit, cap_hit, per_step_G = p2_episode(
+                    lp, en, profit, cap_hit, per_step_G, n_skips = p2_episode(
                         pol_skip, g, ei, cache, B, ts + ep * 200, device)
                     ep_profits.append(profit)
+                    ep_n_skips += n_skips
                     if cap_hit: ep_caps += 1
 
                     # Per-step returns (lower variance than episode reward)
@@ -376,16 +394,25 @@ def train(args, pol_skip_init=None):
                     baseline[bkey] = (1 - P2_BASELINE) * b_val + P2_BASELINE * profit
 
         mean_profit = np.mean(ep_profits)
+        n_eps = len(ep_profits)
+        skips_per_ep = ep_n_skips / max(n_eps, 1)
         is_best = mean_profit > best_p2_profit
         if is_best: best_p2_profit = mean_profit
-        save_ckpt(pol_skip, 2, ep, args.seed, {"profit": mean_profit, "skip_caps": ep_caps})
-        if ep % 20 == 0 or is_best:
+        save_ckpt(pol_skip, 2, ep, args.seed,
+                  {"profit": mean_profit, "skip_caps": ep_caps, "skips_per_ep": skips_per_ep})
+        if ep % 5 == 0 or ep <= 5 or is_best:   # print first 5 epochs + every 5th
             elapsed = time.time() - t0_p2
             msg = (f"[skip s{args.seed} P2 ep{ep:3d}/{P2_EPOCHS}] "
-                   f"profit={mean_profit:.3f}  caps={ep_caps}  elapsed={elapsed:.0f}s"
+                   f"profit={mean_profit:.3f}  caps={ep_caps}"
+                   f"  skips/ep={skips_per_ep:.1f}  elapsed={elapsed:.0f}s"
                    + (" BEST" if is_best else ""))
             print(msg, flush=True)
-            append_readme(msg)
+            if ep % 20 == 0 or is_best:
+                append_readme(msg)
+        if ep == 3 and skips_per_ep < 0.1:
+            print("WARNING: skips_per_ep < 0.1 at ep3 — skip action unreachable. Stopping.", flush=True)
+            append_readme(f"STOPPED ep3 skips_per_ep={skips_per_ep:.3f}")
+            break
 
     print(f"Phase 2 done. best_profit={best_p2_profit:.3f}", flush=True)
 
