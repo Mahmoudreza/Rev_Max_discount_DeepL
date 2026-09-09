@@ -41,8 +41,8 @@ P1_EPOCHS   = 200
 P2_EPOCHS   = 150
 P1_LR       = 3e-4
 P2_LR       = 1e-4
-P2_ENTROPY  = 0.01   # entropy bonus coefficient
-P2_BASELINE = 0.05   # EMA momentum for profit baseline
+P2_ENTROPY  = 0.001  # entropy bonus (small — arm_b init already has good diversity)
+P2_BASELINE = 0.1    # EMA momentum for profit baseline
 GRAD_CLIP   = 1.0
 K_VALUES    = [5, 10, 15, 20, 30, 40]
 TRAIN_SEEDS = list(range(5))   # inner rollout seeds per (graph, k)
@@ -161,7 +161,10 @@ def p1_episode(pol_skip, arm_b, graph, ei, cache, B, seed, device):
 # ── Phase 2 helpers ───────────────────────────────────────────────────────────
 
 def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
-    """One Phase-2 REINFORCE episode. Returns (log_probs, entropy, profit, skip_cap_hit)."""
+    """One Phase-2 REINFORCE episode.
+    Returns (log_probs, entropies, profit, skip_cap_hit, per_step_G).
+    per_step_G[t] = Σ_{τ≥t} r_τ  where r_τ = price_τ-C (if accepted), else 0.
+    """
     n = graph.number_of_nodes()
     set_seed(seed)
     cfg = BudgetEnvConfig(budget_B=B, production_cost=C, seed=seed,
@@ -169,7 +172,7 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
     env = BudgetRevenueEnv(graph, cfg); env.reset()
     pol_skip.reset_episode(device)
 
-    log_probs, entropies = [], []
+    log_probs, entropies, step_rewards = [], [], []
     consec_skips = 0; skip_cap_hit = False
     step_count = 0
 
@@ -184,6 +187,7 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
         log_probs.append(dist.log_prob(torch.tensor(action, device=device)))
         entropies.append(dist.entropy())
 
+        step_reward = 0.0
         if action == n:  # skip
             pol_skip.update_sequence_state(0.0, False, 0.0)
             consec_skips += 1
@@ -194,16 +198,25 @@ def p2_episode(pol_skip, graph, ei, cache, B, seed, device):
             node = env.nodes[action]
             d = float(pol_skip.get_discount_distribution(
                 torch.cat([h[action], ctx])).mean.item())
+            v_hat = float(env._estimate_valuation(node))
+            price = v_hat * (1.0 - d)
             _, r, done, info = env.step(action, d)
             acc = bool(info.get("accepted", r > 0))
             pol_skip.update_sequence_state(d, acc, info.get("revenue_step", 0.0))
+            if acc: step_reward = price - C   # marginal profit (can be negative)
             if done: break
+        step_rewards.append(step_reward)
         step_count += 1
 
     profit = float(env.B) - B   # = R - c|S_T|
     lp = torch.stack(log_probs) if log_probs else torch.zeros(1, device=device)
     en = torch.stack(entropies) if entropies else torch.zeros(1, device=device)
-    return lp, en, profit, skip_cap_hit
+    # Per-step returns (suffix sums)
+    G = []; cum = 0.0
+    for rw in reversed(step_rewards):
+        cum += rw; G.append(cum)
+    G.reverse()
+    return lp, en, profit, skip_cap_hit, G if len(G) == len(step_rewards) else None
 
 
 # ── Main training loop ────────────────────────────────────────────────────────
@@ -228,6 +241,19 @@ def train(args, pol_skip_init=None):
         ei, cache = make_ei(g, device)
         eis.append(ei); caches.append(cache)
     print(f"  {len(graphs)} graphs: n={[g.number_of_nodes() for g in graphs]}", flush=True)
+
+    # ── arm_b init for Phase 2 ──────────────────────────────────────────────
+    if args.arm_b_init:
+        arm_b_sd = {k: v for k, v in arm_b.state_dict().items()}
+        missing, unexpected = pol_skip.load_state_dict(arm_b_sd, strict=False)
+        print(f"arm_b_init: loaded {len(arm_b_sd)-len(missing)} keys "
+              f"(missing={len(missing)} = skip_head, unexpected={len(unexpected)})", flush=True)
+        # Freeze everything except skip_head so arm_b behaviour is preserved
+        for name, p in pol_skip.named_parameters():
+            p.requires_grad_("skip_head" in name)
+        n_trainable = sum(p.numel() for p in pol_skip.parameters() if p.requires_grad)
+        print(f"  trainable params: {n_trainable} (skip_head only)", flush=True)
+        args.skip_p1 = True   # no imitation phase
 
     best_p1_loss = float("inf")
     best_p2_profit = -float("inf")
@@ -264,8 +290,11 @@ def train(args, pol_skip_init=None):
         print(f"Phase 1 done. best_loss={best_p1_loss:.4f}", flush=True)
 
     # ── PHASE 2 ──────────────────────────────────────────────────────────────
-    opt2 = torch.optim.Adam(pol_skip.parameters(), lr=P2_LR)
-    baseline = {}  # key = (gi, k) → EMA profit
+    opt2 = torch.optim.Adam(filter(lambda p: p.requires_grad, pol_skip.parameters()), lr=P2_LR)
+    # Initial baseline: arm_b earns ≈ 0 to -B; start at -0.5*B so profit=0 (skip all) is above it
+    baseline = {(gi, k): -0.5 * k * C
+                for gi in range(len(graphs)) for k in K_VALUES}
+    ckpt_prefix = "skip_arminit" if args.arm_b_init else "skip"
     best_p2_profit = -float("inf")
     t0_p2 = time.time()
 
@@ -278,23 +307,28 @@ def train(args, pol_skip_init=None):
             for k in K_VALUES:
                 B = k * C
                 bkey = (gi, k)
-                b_val = baseline.get(bkey, 0.0)
+                b_val = baseline[bkey]
 
                 for ts in TRAIN_SEEDS:
-                    lp, en, profit, cap_hit = p2_episode(
+                    lp, en, profit, cap_hit, per_step_G = p2_episode(
                         pol_skip, g, ei, cache, B, ts + ep * 200, device)
                     ep_profits.append(profit)
                     if cap_hit: ep_caps += 1
 
-                    advantage = profit - b_val
-                    loss = -(lp.sum() * advantage) - P2_ENTROPY * en.sum()
+                    # Per-step returns (lower variance than episode reward)
+                    if per_step_G is not None and len(per_step_G) == len(lp):
+                        G = torch.tensor(per_step_G, dtype=torch.float32, device=device)
+                        adv = G - b_val
+                        loss = -(lp * adv).sum() - P2_ENTROPY * en.sum()
+                    else:
+                        advantage = profit - b_val
+                        loss = -(lp.sum() * advantage) - P2_ENTROPY * en.sum()
                     opt2.zero_grad()
                     loss.backward()
                     nn.utils.clip_grad_norm_(pol_skip.parameters(), GRAD_CLIP)
                     opt2.step()
                     ep_losses.append(loss.item())
 
-                    # Update baseline (EMA)
                     baseline[bkey] = (1 - P2_BASELINE) * b_val + P2_BASELINE * profit
 
         mean_profit = np.mean(ep_profits)
@@ -320,6 +354,8 @@ def main():
                     help="Skip Phase 1; start Phase 2 from scratch or from --resume_p1")
     ap.add_argument("--resume_p1", type=str,  default=None,
                     help="Path to a P1 checkpoint; loads weights then runs Phase 2 only")
+    ap.add_argument("--arm_b_init", action="store_true",
+                    help="Init Phase 2 from arm_b weights (skip_head trainable only); skips Phase 1")
     args = ap.parse_args()
 
     pol_init = None
