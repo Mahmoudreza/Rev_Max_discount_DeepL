@@ -87,6 +87,49 @@ def append_readme(msg):
         f.write(msg + "\n")
 
 
+# ── Skip-head calibration ────────────────────────────────────────────────────
+
+def calibrate_skip_bias(pol_skip, graphs, eis, caches, device, n_steps=30):
+    """Set skip_head last-layer bias to mean(buyer_scores) - 1*std(buyer_scores).
+    Ensures skip fires ~16% of the time initially (not always, not never).
+    """
+    scores_all = []
+    with torch.no_grad():
+        for g, ei, cache in zip(graphs[:3], eis[:3], caches[:3]):
+            n = g.number_of_nodes()
+            cfg = BudgetEnvConfig(budget_B=10*C, production_cost=C, seed=0,
+                                  weight_high=W_HIGH, n_mc_samples=N_MC_TRAIN)
+            env = BudgetRevenueEnv(g, cfg); env.reset()
+            pol_skip.reset_episode(device)
+            for _ in range(n_steps):
+                if not env.available_nodes or env._check_bankrupt(): break
+                x  = torch.FloatTensor(_feat_unconstrained(cache, env, n)).to(device)
+                av = _avail_mask(env, n, device)
+                if not av.any(): break
+                sc_full, h, ctx, _ = pol_skip.forward(x, ei, av)
+                sc_buyers = sc_full[:-1][av]      # available buyer raw logits
+                scores_all.extend(sc_buyers.cpu().tolist())
+                ni = int(sc_full[:-1].argmax().item())
+                d  = float(pol_skip.get_discount_distribution(
+                    torch.cat([h[ni], ctx])).mean.item())
+                _, r, done, info = env.step(ni, d)
+                acc = bool(info.get("accepted", r > 0))
+                pol_skip.update_sequence_state(d, acc, info.get("revenue_step", 0.0))
+                if done: break
+
+    if not scores_all:
+        print("calibrate_skip_bias: no samples — bias stays at 0", flush=True)
+        return
+    arr = np.array(scores_all)
+    mean_sc, std_sc = float(arr.mean()), float(arr.std())
+    target = mean_sc - std_sc   # skip competes below ~16th pct of buyer scores
+    # set bias of final linear in skip_head = Sequential(Lin, ReLU, Lin)
+    nn.init.constant_(pol_skip.skip_head[-1].bias, target)
+    nn.init.zeros_(pol_skip.skip_head[-1].weight)
+    print(f"calibrate_skip_bias: n={len(arr)}  mean={mean_sc:.3f}  std={std_sc:.3f}"
+          f"  → skip_bias={target:.3f}", flush=True)
+
+
 # ── Phase 1 helpers ───────────────────────────────────────────────────────────
 
 @torch.no_grad()
@@ -254,6 +297,7 @@ def train(args, pol_skip_init=None):
         n_trainable = sum(p.numel() for p in pol_skip.parameters() if p.requires_grad)
         print(f"  trainable params: {n_trainable} (skip_head only)", flush=True)
         args.skip_p1 = True   # no imitation phase
+        calibrate_skip_bias(pol_skip, graphs, eis, caches, device)
 
     best_p1_loss = float("inf")
     best_p2_profit = -float("inf")
