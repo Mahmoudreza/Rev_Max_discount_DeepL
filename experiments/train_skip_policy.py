@@ -304,14 +304,17 @@ def train(args, pol_skip_init=None):
         # Rationale: arm_b discounts at 0.97 → price ≈ 0.03*v_hat << c=0.3 even for
         # warm buyers. Pricing must also adapt; selection order stays arm_b-like.
         # Use "skip" / "discount" allow-list (robust to exact attribute names).
-        TRAINABLE_KEYS = ("skip", "discount")
+        # "pricing_head" is the actual attribute name in SequentialJointPolicy
+        # "skip_head" is new in SequentialJointPolicySkip
+        # Keep encoder (GNN), lstm, scoring_head frozen (selection order preserved)
+        TRAINABLE_KEYS = ("skip_head", "pricing_head")
         for name, p in pol_skip.named_parameters():
-            p.requires_grad_(any(k in name for k in TRAINABLE_KEYS))
+            p.requires_grad_(any(name.startswith(k) for k in TRAINABLE_KEYS))
         n_trainable = sum(p.numel() for p in pol_skip.parameters() if p.requires_grad)
         n_frozen    = sum(p.numel() for p in pol_skip.parameters() if not p.requires_grad)
         trainable_names = [n for n,p in pol_skip.named_parameters() if p.requires_grad]
         print(f"  trainable: {n_trainable}  frozen: {n_frozen}", flush=True)
-        print(f"  trainable params: {trainable_names}", flush=True)
+        print(f"  trainable layers: {set(n.rsplit('.',1)[0] for n in trainable_names)}", flush=True)
         args.skip_p1 = True   # no imitation phase
         calibrate_skip_bias(pol_skip, graphs, eis, caches, device)
 
